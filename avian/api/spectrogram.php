@@ -1,8 +1,8 @@
 <?php
-// /home/monalisa/BirdSongs/Extracted/spectrogram.php — serves the
-// spectrogram PNG that BirdNET-Pi generates alongside each detection mp3.
-// Same lookup logic as recording.php (find the matching file under
-// By_Date/<date>/<Common_Name>/) — just .png instead of .mp3.
+// AvianVisitors — serves the spectrogram PNG that BirdNET-Pi generates
+// alongside each detection mp3. Same lookup logic as recording.php (find
+// the matching file under By_Date/<date>/<Common_Name>/) — just .png
+// instead of .mp3.
 //
 // Endpoints:
 //   ?sci=<sci_name>            → newest spectrogram for that species
@@ -31,7 +31,7 @@ if ($sci !== '' && !preg_match('/^[A-Za-z]{2,40}(?:[ ][a-z]{2,40}){1,3}$/', $sci
     exit;
 }
 
-$BY_DATE = '/home/monalisa/BirdSongs/Extracted/By_Date';
+$BY_DATE = getenv('HOME') . '/BirdSongs/Extracted/By_Date';
 
 // ---- Direct-by-file lookup ----
 // BirdNET-Pi writes <base>.mp3 and <base>.png next to each other under
@@ -93,7 +93,7 @@ if ($file !== '') {
 }
 
 function resolve_common(string $sci): ?string {
-    $f = '/home/monalisa/BirdNET-Pi/scripts/birds.json';
+    $f = getenv('HOME') . '/BirdNET-Pi/scripts/birds.json';
     if (is_readable($f)) {
         $list = json_decode((string)file_get_contents($f), true);
         if (is_array($list)) {
@@ -107,7 +107,7 @@ function resolve_common(string $sci): ?string {
             }
         }
     }
-    $labels = '/home/monalisa/BirdNET-Pi/model/labels.txt';
+    $labels = getenv('HOME') . '/BirdNET-Pi/model/labels.txt';
     if (is_readable($labels)) {
         foreach (file($labels, FILE_IGNORE_NEW_LINES) as $line) {
             if (strpos($line, '_') !== false) {

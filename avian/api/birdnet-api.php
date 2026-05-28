@@ -1,26 +1,35 @@
 <?php
-// /home/monalisa/BirdSongs/Extracted/api.php — JSON facade over BirdNET-Pi's
-// birds.db, queryable by the bird.onethreenine.net Cloudflare Worker.
-//
-// Lives in the Caddy file-server root (NOT in BirdNET-Pi/scripts/) so the
-// Sunday auto-update doesn't clobber it. Reachable as /api.php on the Pi.
-//
-// Auth: callers must send X-BirdNET-Proxy-Token matching the Caddy gate set
-// up earlier — Caddy 403s anything missing it before this script runs, so we
-// inherit that protection for free. The Cloudflare Worker is the only thing
-// that ever sets the header.
+// AvianVisitors — JSON facade over BirdNET-Pi's birds.db. Read-only.
+// Symlinked into the BirdNET-Pi Caddy site root at /avian/api/.
 //
 // Endpoints (?action=...):
-//   stats       — totals: detections, unique species, today, last hour, etc.
+//   stats       — totals (detections, unique species, today, last hour)
 //   lifelist    — every species with first_seen, last_seen, total_count
-//   recent      — &hours=N (default 24): every detection in the window
-//   species     — &sci=<sci_name>: detail page for one species
+//   recent      — &hours=N (default 24): species heard in the window
+//   species     — &sci=<sci_name>: per-species detail page
+//   timeseries  — &days=N: daily detection counts per species
+//   firstseen   — every species' earliest detection
+//
+// Default LAN deploy ships without auth. If you've exposed the Pi via
+// Cloudflare or a tunnel, add a Caddy `basic_auth` matcher around the
+// /avian/api/* path — see avian/forwarding/.
 
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: public, max-age=30');
 
-$DB_PATH = '/home/monalisa/BirdNET-Pi/scripts/birds.db';
+// SCRIPT_FILENAME on the Pi resolves through the symlink to
+// $HOME/BirdNET-Pi/avian/api/birdnet-api.php — walk three dirs up to
+// reach the install root, then point at scripts/birds.db. Lets a Pi
+// installed under any username (the BirdNET-Pi installer uses $USER,
+// not a fixed name) work without editing this file.
+$DB_PATH = dirname(__DIR__, 3) . '/scripts/birds.db';
+// Fallback if the symlink layout ever changes — keeps the most common
+// install path working even if SCRIPT_FILENAME oddities trip __DIR__.
+if (!file_exists($DB_PATH)) {
+    $alt = getenv('HOME') . '/BirdNET-Pi/scripts/birds.db';
+    if (file_exists($alt)) $DB_PATH = $alt;
+}
 
 if (!file_exists($DB_PATH)) {
     http_response_code(503);

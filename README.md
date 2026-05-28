@@ -2,7 +2,7 @@
 
 *A live bird collage from your apartment window.*
 
-A frontend overlay for [BirdNET-Pi](https://github.com/Nachtzuster/BirdNET-Pi). Listens to your balcony, identifies every passing bird with Cornell's [BirdNET](https://birdnet.cornell.edu/), and renders the detections as a tile-packed kachō-e print at `http://birdnet.local/collage/`. Full project writeup at [teddywarner.org/Projects/AvianVisitors](https://teddywarner.org/Projects/AvianVisitors/).
+A fork of [BirdNET-Pi](https://github.com/Nachtzuster/BirdNET-Pi) that adds a tile-packed kachō-e collage UI. Listens to your balcony with Cornell's [BirdNET](https://birdnet.cornell.edu/), illustrates every detected species in the style of Edo-period Japanese woodblock prints, and renders them sized by call count. See it running at [bird.onethreenine.net](https://bird.onethreenine.net).
 
 <img alt="avianvisitors collage" src="docs/thumb.png" />
 
@@ -10,101 +10,85 @@ A frontend overlay for [BirdNET-Pi](https://github.com/Nachtzuster/BirdNET-Pi). 
 
 ## BOM
 
-| Qty | Description | Price | Link | Notes |
-|-----|-------------|-------|------|-------|
-| 1 | Raspberry Pi (4B / 5 / Zero 2W) | ~$35–80 | [Raspberry Pi](https://www.raspberrypi.com/products/) | 4B+ recommended |
-| 1 | Micro SD Card | ~$10 | [Amazon](https://a.co/d/08aiL8c) | ≥32 GB |
-| 1 | USB Lavalier Microphone | $14.99 | [Amazon](https://www.amazon.com/dp/B0176NRE1G) | The one I used. Any USB mic with a half-decent capsule works. |
-| 1 | Pi Power Supply | ~$10 | — | Matched to your Pi model |
+| Qty | Description | Price | Link |
+|-----|-------------|-------|------|
+| 1 | Raspberry Pi (4B / 5 / Zero 2W) | ~$35–80 | [Raspberry Pi](https://www.raspberrypi.com/products/) |
+| 1 | Micro SD Card (≥32 GB) | ~$10 | [Amazon](https://a.co/d/08aiL8c) |
+| 1 | USB lavalier microphone | $14.99 | [Amazon](https://www.amazon.com/dp/B0176NRE1G) |
+| 1 | Pi power supply | ~$10 | — |
 
-You'll also need a [Gemini API key](https://aistudio.google.com/apikey) (free tier is enough for an apartment-scale lifelist) and, optionally, an [eBird API key](https://ebird.org/api/keygen) for region-filtering the species pre-gen.
-
----
-
-## 1. Install BirdNET-Pi
-
-Follow the [BirdNET-Pi installation guide](https://github.com/mcguirepr89/BirdNET-Pi/wiki/Installation-Guide) on your Pi. Confirm the stock BirdNET-Pi UI is reachable at `http://birdnet.local/` before continuing.
+Optional: a [Gemini API key](https://aistudio.google.com/apikey) (free tier covers a regional regen) for restyling or adding species, and an [eBird API key](https://ebird.org/api/keygen) for filtering the species list to your area.
 
 ---
 
-## 2. Clone AvianVisitors
+## 1. Flash the SD card
+
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Pick **Raspberry Pi OS Lite (64-bit)**. In the customisation dialog, set:
+
+- Username (your choice — the installer uses whatever you pick)
+- WiFi SSID + password
+- Hostname: `birdnet` (so it's reachable at `birdnet.local`)
+- Enable SSH with password auth
+
+Boot the Pi.
+
+---
+
+## 2. Run the installer
+
+SSH in and run one command:
 
 ```bash
-ssh monalisa@birdnet.local
-git clone https://github.com/Twarner491/AvianVisitors.git ~/AvianVisitors
-cd ~/AvianVisitors
+ssh <your-username>@birdnet.local
+curl -s https://raw.githubusercontent.com/Twarner491/AvianVisitors/avian-visitors/newinstaller.sh | bash
 ```
+
+The installer clones this fork, sets up BirdNET-Pi (audio capture, model, web UI), and symlinks the AvianVisitors overlay into the Caddy web root. Takes 20–40 minutes. The Pi reboots when done.
+
+Open `http://birdnet.local/avian/` from any device on your network. The BirdNET-Pi stock UI sits at `http://birdnet.local/`.
 
 ---
 
-## 3. Pre-generate illustrations for your region (optional but recommended)
+## 3. (Optional) Restyle the illustrations
 
-The repo ships with ~450 bundled illustrations. To restyle, regenerate, or add region-specific species, run the pregen script with your Gemini key.
+The repo ships with 450 bundled illustrations covering most North-American species. To change the visual style or add region-specific birds:
 
 ```bash
 export GEMINI_API_KEY='your-gemini-key'
 
-# Generate every species BirdNET-Pi knows:
-python3 avian/scripts/pregen.py --labels ~/BirdNET-Pi/model/labels.txt
+# Re-render every species in BirdNET-Pi's model:
+python3 ~/BirdNET-Pi/avian/scripts/pregen.py --labels ~/BirdNET-Pi/model/labels.txt --force
 
-# Or filter to species observed in your state/county via eBird:
+# Or only species eBird has observed in your region:
 export EBIRD_API_KEY='your-ebird-key'
-python3 avian/scripts/pregen.py \
+python3 ~/BirdNET-Pi/avian/scripts/pregen.py \
   --labels ~/BirdNET-Pi/model/labels.txt \
-  --ebird-region US-CA   # state, or US-CA-085 for a county
+  --ebird-region US-CA       # state, or US-CA-085 for a county
 ```
 
-To change the art style, edit [`avian/scripts/prompt.template.md`](avian/scripts/prompt.template.md) and re-run with `--force`. The template has `{sci_name}`, `{com_name}`, and `{pose}` placeholders; swap the body for whatever style you want (woodblock, ink wash, scientific plate, etc.).
+Style is a single editable file at [`avian/scripts/prompt.template.md`](avian/scripts/prompt.template.md). Replace the body, re-run pregen with `--force`, done.
 
 ---
 
-## 4. Install the frontend
+## 4. (Optional) Forward off your LAN
 
-One-shot installer — drops the static collage UI into `/var/www/avian`, the JSON shims into BirdNET-Pi's PHP root, and a Caddy snippet that mounts everything at `http://birdnet.local/collage/`.
+See [`avian/forwarding/`](avian/forwarding/) for three independent recipes:
 
-```bash
-bash avian/scripts/install.sh
-```
-
-That's it. Open `http://birdnet.local/collage/` from any device on your network. As BirdNET-Pi accumulates detections, they fade into the collage — sized by how often each species has been heard.
-
----
-
-## 5. Loading the Gemini key on the Pi (for live JIT generation)
-
-The bundled illustrations cover most North-American species. For new birds the Pi hasn't seen before, AvianVisitors can render them on the fly. Drop the key into a systemd environment file so the JIT generator picks it up:
-
-```bash
-sudo mkdir -p /etc/avian
-echo "GEMINI_API_KEY=your-gemini-key" | sudo tee /etc/avian/env >/dev/null
-sudo chmod 600 /etc/avian/env
-sudo systemctl restart php8.2-fpm
-```
-
-The PHP shim at `avian/api/cutout.php` reads `/etc/avian/env` and falls through to a Wikipedia photo if the key is missing — so you can run completely Gemini-free if you'd rather.
-
----
-
-## 6. Optional: forward off your local network
-
-For public access, Home Assistant integration, or MQTT fan-out, see [`avian/forwarding/`](avian/forwarding/). Each recipe is independent:
-
-- **Cloudflare Tunnel** — public HTTPS URL, no port forwarding, optional Cloudflare Access for password protection.
-- **Home Assistant REST sensor** — surfaces the latest detection as a sensor.value for automations.
-- **MQTT bridge** — publishes every new detection to a broker as JSON.
+- **Cloudflare Tunnel** — public HTTPS URL, no port forwarding, optional Cloudflare Access password gate.
+- **Home Assistant REST sensor** — surfaces the latest detection for automations.
+- **MQTT bridge** — publishes every new detection as JSON.
 
 ---
 
 ## Repo layout
 
 ```
-avian/
-├── frontend/         # static HTML/JS/CSS for the collage
-├── assets/           # bundled illustrations + cutouts + masks
-├── api/              # PHP shims served by BirdNET-Pi's existing PHP-FPM
-├── scripts/          # installer + Gemini pregen + editable prompt
-├── caddy/            # snippet mounting /collage on existing Caddy
-└── forwarding/       # optional HA / MQTT / Cloudflare configs
+avian/                  # everything we add to BirdNET-Pi
+├── frontend/           # static HTML/JS/CSS for the collage
+├── assets/             # 450 bundled illustrations + cutouts + masks
+├── api/                # PHP shims served by BirdNET-Pi's PHP-FPM
+├── scripts/            # pregen.py + editable prompt template
+└── forwarding/         # optional HA / MQTT / Cloudflare configs
 ```
 
 Everything outside `avian/` is upstream BirdNET-Pi.
@@ -113,7 +97,7 @@ Everything outside `avian/` is upstream BirdNET-Pi.
 
 ## License
 
-CC-BY-NC-SA-4.0 (inherited from BirdNET-Pi). Non-commercial use only; share-alike on derivatives. See [`LICENSE`](LICENSE) and [`README.upstream.md`](README.upstream.md).
+CC-BY-NC-SA-4.0, inherited from [BirdNET-Pi's upstream license](https://github.com/Nachtzuster/BirdNET-Pi/blob/main/LICENSE). Non-commercial use only; share-alike on derivatives. See the [BirdNET-Pi README](https://github.com/Nachtzuster/BirdNET-Pi/blob/main/README.md) for the full Cornell attribution.
 
 ---
 

@@ -1,16 +1,15 @@
 <?php
-// /home/monalisa/BirdSongs/Extracted/recording.php — serves the most-recent
-// detection mp3 for a given scientific name. Called by the Cloudflare Worker
-// at /api/recording?sci=<name>.
+// AvianVisitors — serves the most-recent detection mp3 for a given
+// scientific name. Called by the collage detail modal at
+// /avian/api/recording.php?sci=<name>.
 //
 // BirdNET-Pi writes audio + spectrograms to
-//   ~/BirdSongs/Extracted/By_Date/YYYY-MM-DD/<Common_Name>/<base>.mp3
-// (with a matching .png next to it).  Common_Name is the SPACE-stripped
-// English common name (e.g. "Anna's_Hummingbird"), NOT the scientific name.
-// We resolve sci → common via the same lookup the Pi's web UI uses
-// (birds.json under /scripts/) and then walk the directory tree newest-first.
+//   $HOME/BirdSongs/Extracted/By_Date/YYYY-MM-DD/<Common_Name>/<base>.mp3
+// (with a matching .png next to it). Common_Name is the SPACE-stripped
+// English common name (e.g. "Anna's_Hummingbird"), NOT the scientific
+// name. We resolve sci → common via birds.json under BirdNET-Pi/scripts/
+// and walk the directory tree newest-first.
 //
-// Auth: the Caddy site block 403s anything missing X-BirdNET-Proxy-Token.
 
 declare(strict_types=1);
 
@@ -33,7 +32,7 @@ if ($sci !== '' && !preg_match('/^[A-Za-z]{2,40}(?:[ ][a-z]{2,40}){1,3}$/', $sci
     exit;
 }
 
-$BY_DATE = '/home/monalisa/BirdSongs/Extracted/By_Date';
+$BY_DATE = getenv('HOME') . '/BirdSongs/Extracted/By_Date';
 
 // ---- Direct-by-file lookup ----
 // Used by the atlas detail modal to play any past recording.
@@ -95,14 +94,14 @@ if ($file !== '') {
     exit;
 }
 $BIRDS_JSON_CANDIDATES = [
-    '/home/monalisa/BirdNET-Pi/scripts/birds.json',
-    '/home/monalisa/BirdNET-Pi/model/labels.txt',
+    getenv('HOME') . '/BirdNET-Pi/scripts/birds.json',
+    getenv('HOME') . '/BirdNET-Pi/model/labels.txt',
 ];
 
 // ---- Resolve scientific name → common name (with underscores) ----
 function resolve_common(string $sci): ?string {
     // Try birds.json first (preferred — has clean sci/com pairs).
-    foreach (['/home/monalisa/BirdNET-Pi/scripts/birds.json'] as $f) {
+    foreach ([getenv('HOME') . '/BirdNET-Pi/scripts/birds.json'] as $f) {
         if (is_readable($f)) {
             $list = json_decode((string)file_get_contents($f), true);
             if (is_array($list)) {
@@ -118,7 +117,7 @@ function resolve_common(string $sci): ?string {
         }
     }
     // Fallback: labels.txt has "<sci>_<com>" or "<sci>, <com>" per line.
-    $labels = '/home/monalisa/BirdNET-Pi/model/labels.txt';
+    $labels = getenv('HOME') . '/BirdNET-Pi/model/labels.txt';
     if (is_readable($labels)) {
         foreach (file($labels, FILE_IGNORE_NEW_LINES) as $line) {
             if (strpos($line, '_') !== false) {

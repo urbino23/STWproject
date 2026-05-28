@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 """AvianVisitors — pre-generate kachō-e illustrations for a region.
 
-Reads a species list (from BirdNET-Pi's labels.txt, eBird, or stdin),
+Reads a species list (BirdNET-Pi's labels.txt, eBird, or stdin),
 generates an illustration for each via the Gemini 2.5 Flash Image API,
 and saves PNGs into avian/assets/illustrations/.
 
 Each species gets two poses: <slug>.png (perched) and <slug>-2.png
-(flight). The prompt template lives at avian/scripts/prompt.template.md
-— edit it to change the visual style.
+(flight). Edit avian/scripts/prompt.template.md to change the visual
+style — the prompt body is re-sent verbatim per request with
+{sci_name}, {com_name}, and {pose} substituted.
 
 Usage:
-    # Generate the full BirdNET-Pi label set:
-    python3 pregen.py --labels /home/$USER/BirdNET-Pi/model/labels.txt
+    # Every species BirdNET-Pi knows:
+    python3 pregen.py --labels ~/BirdNET-Pi/model/labels.txt
 
-    # Generate only species observed in eBird region US-CA:
-    python3 pregen.py --labels labels.txt --ebird-region US-CA --ebird-key YOUR_KEY
+    # Only species observed in an eBird region:
+    python3 pregen.py --labels ~/BirdNET-Pi/model/labels.txt \\
+                      --ebird-region US-CA --ebird-key YOUR_KEY
 
-    # Re-render a single species (useful when you tweak the prompt):
+    # Re-render a single species (useful after editing the prompt):
     python3 pregen.py --species "Calypte anna|Anna's Hummingbird" --force
 
-    # Re-render everything (after a prompt change you actually want applied):
-    python3 pregen.py --labels labels.txt --force
+    # Re-render everything after a prompt change:
+    python3 pregen.py --labels ~/BirdNET-Pi/model/labels.txt --force
 
-Set GEMINI_API_KEY in the environment or pass --gemini-key.
+Set GEMINI_API_KEY in the environment (preferred) or pass --gemini-key.
 """
 from __future__ import annotations
 import argparse
@@ -37,108 +39,149 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# Gemini's image-out model. The endpoint changes occasionally; if you
+# get a 404 here, check Google's model catalog and bump this.
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.5-flash-image:generateContent?key={key}"
+    "gemini-2.5-flash-image-preview:generateContent"
 )
 POSES = {1: "perched", 2: "in flight with wings spread"}
 
 
 def slugify(sci: str) -> str:
+    """Match avian/frontend/apt.js slugify() exactly."""
     return re.sub(r"[^a-z0-9]+", "-", sci.lower()).strip("-")
 
 
+def parse_species_line(line: str) -> tuple[str, str] | None:
+    """Accept any of: 'Sci|Com', 'Sci_Com', 'Sci,Com'. Skip blanks + #."""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    for sep in ("|", "_", ","):
+        if sep in line:
+            sci, com = line.split(sep, 1)
+            sci, com = sci.strip(), com.strip()
+            if sci and com:
+                return (sci, com)
+    return None
+
+
+def parse_species_list(lines: list[str]) -> tuple[list[tuple[str, str]], int]:
+    """Returns (parsed, skipped_count)."""
+    out, skipped = [], 0
+    for line in lines:
+        parsed = parse_species_line(line)
+        if parsed:
+            out.append(parsed)
+        elif line.strip() and not line.lstrip().startswith("#"):
+            skipped += 1
+    return out, skipped
+
+
 def load_prompt(path: Path) -> str:
-    """Pull the prompt body from the markdown template — everything
-    after the `## Prompt` heading, stripped."""
+    """Return everything after the `## Prompt` heading, stripped to the
+    next `##` heading (so doc preamble or trailing sections don't bleed
+    into the API call)."""
     text = path.read_text()
-    m = re.search(r"##\s*Prompt\s*\n(.+)$", text, flags=re.DOTALL)
+    m = re.search(r"##\s*Prompt\s*\n(.+?)(?=\n##\s|\Z)", text, flags=re.DOTALL)
     return (m.group(1) if m else text).strip()
 
 
-def parse_labels(p: Path) -> list[tuple[str, str]]:
-    """BirdNET-Pi labels.txt format: `Sci name_Common Name` per line."""
-    out = []
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        # Split on first underscore (BirdNET format)
-        if "_" in line:
-            sci, com = line.split("_", 1)
-        elif "," in line:
-            sci, com = (s.strip() for s in line.split(",", 1))
-        else:
-            continue
-        sci = sci.strip()
-        com = com.strip()
-        if sci and com:
-            out.append((sci, com))
-    return out
-
-
-def ebird_filter(species: list[tuple[str, str]], region: str, key: str) -> list[tuple[str, str]]:
-    """Intersect a label set with the eBird observed-species list for a
-    region. Region codes look like US-CA (state) or US-CA-085 (county).
-    See https://documenter.getpostman.com/view/664302/S1ENwy59"""
+def ebird_filter(species, region: str, key: str):
+    """Intersect a label set with the eBird species list for a region.
+    Region codes: US-CA (state), US-CA-085 (county)."""
     url = f"https://api.ebird.org/v2/product/spplist/{region}"
     req = urllib.request.Request(url, headers={"X-eBirdApiToken": key})
     with urllib.request.urlopen(req, timeout=30) as r:
         ebird_codes = set(json.loads(r.read()))
-    # eBird returns 6-letter species codes — we need sci names. Use the
-    # taxonomy endpoint to map.
-    tax_url = f"https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json"
+    tax_url = "https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json"
     req2 = urllib.request.Request(tax_url, headers={"X-eBirdApiToken": key})
     with urllib.request.urlopen(req2, timeout=60) as r:
         taxonomy = json.loads(r.read())
     code_to_sci = {t["speciesCode"]: t["sciName"] for t in taxonomy}
-    allowed_sci = {code_to_sci[c] for c in ebird_codes if c in code_to_sci}
-    return [(s, c) for s, c in species if s in allowed_sci]
+    allowed = {code_to_sci[c] for c in ebird_codes if c in code_to_sci}
+    return [(s, c) for s, c in species if s in allowed]
 
 
 def gen_one(api_key: str, prompt: str, sci: str, com: str, pose: int) -> bytes:
-    """Single Gemini call. Returns raw PNG bytes."""
-    body = prompt.replace("{sci_name}", sci).replace("{com_name}", com).replace(
-        "{pose}", POSES[pose]
-    )
+    """Single Gemini call with bounded retry on 429 + transient 5xx.
+    Returns raw PNG bytes."""
+    body = (prompt
+            .replace("{sci_name}", sci)
+            .replace("{com_name}", com)
+            .replace("{pose}", POSES[pose]))
     payload = {
         "contents": [{"parts": [{"text": body}]}],
-        "generationConfig": {"responseModalities": ["IMAGE"]},
+        # TEXT included so Gemini can surface safety messaging without
+        # rejecting the request shape (image-only sometimes errors).
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
     }
+    # API key as header, NOT URL — keeps the key out of Google's
+    # request logs, proxy logs, and shell history.
     req = urllib.request.Request(
-        GEMINI_URL.format(key=urllib.parse.quote(api_key)),
+        GEMINI_URL,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.loads(r.read())
+
+    backoff = 4.0
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                resp = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < 3:
+                retry_after = float(e.headers.get("Retry-After") or backoff)
+                time.sleep(retry_after)
+                backoff *= 2
+                continue
+            raise
+        except urllib.error.URLError:
+            if attempt < 3:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
+
     for cand in resp.get("candidates", []):
         for part in cand.get("content", {}).get("parts", []):
             inline = part.get("inlineData") or part.get("inline_data")
             if inline and inline.get("data"):
                 return base64.b64decode(inline["data"])
-    raise RuntimeError(f"no image in response: {json.dumps(resp)[:300]}")
+    # No image — surface the blocking reason so users know what to fix.
+    finish = (resp.get("candidates", [{}])[0]).get("finishReason", "?")
+    block = resp.get("promptFeedback", {}).get("blockReason", "")
+    raise RuntimeError(f"no image (finish={finish} block={block})")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--labels", type=Path, help="BirdNET-Pi labels.txt path")
+    src.add_argument("--labels", type=Path, help="Path to BirdNET-Pi labels.txt (or any file of Sci|Com lines)")
     src.add_argument("--species", action="append", default=[],
-                     help="Manual species in format 'Sci name|Common Name' (repeatable)")
-    src.add_argument("--stdin", action="store_true", help="Read species from stdin (one per line, same format)")
+                     help="Manual 'Sci|Com' (repeatable)")
+    src.add_argument("--stdin", action="store_true", help="Read Sci|Com lines from stdin")
     ap.add_argument("--ebird-region", help="eBird region code (e.g. US-CA, US-CA-085) to filter labels")
-    ap.add_argument("--ebird-key", help="eBird API key (or set EBIRD_API_KEY)")
-    ap.add_argument("--gemini-key", help="Gemini API key (or set GEMINI_API_KEY)")
-    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parents[1] / "assets" / "illustrations",
+    ap.add_argument("--ebird-key", help="eBird API key (or EBIRD_API_KEY env)")
+    ap.add_argument("--gemini-key", help="Gemini API key (or GEMINI_API_KEY env)")
+    ap.add_argument("--out", type=Path,
+                    default=Path(__file__).resolve().parents[1] / "assets" / "illustrations",
                     help="Output directory (default: avian/assets/illustrations/)")
-    ap.add_argument("--prompt", type=Path, default=Path(__file__).resolve().parent / "prompt.template.md",
+    ap.add_argument("--prompt", type=Path,
+                    default=Path(__file__).resolve().parent / "prompt.template.md",
                     help="Prompt template path")
     ap.add_argument("--poses", nargs="+", type=int, default=[1, 2],
-                    help="Which poses to render (1=perched, 2=flight). Default: both.")
+                    choices=list(POSES.keys()),
+                    help="Which poses to render. 1=perched, 2=flight. Default: both.")
     ap.add_argument("--force", action="store_true", help="Re-render even if file exists")
-    ap.add_argument("--sleep", type=float, default=1.0, help="Seconds between API calls (rate limit)")
+    ap.add_argument("--sleep", type=float, default=4.0,
+                    help="Seconds between API calls (default 4 = under free-tier RPM cap)")
     ap.add_argument("--limit", type=int, default=0, help="Cap species count for testing")
     args = ap.parse_args()
 
@@ -149,15 +192,13 @@ def main() -> int:
 
     # Build species list
     if args.labels:
-        species = parse_labels(args.labels)
+        species, skipped = parse_species_list(args.labels.read_text().splitlines())
     elif args.stdin:
-        species = parse_labels_lines(sys.stdin.read().splitlines())
+        species, skipped = parse_species_list(sys.stdin.read().splitlines())
     else:
-        species = []
-        for s in args.species:
-            if "|" in s:
-                sci, com = s.split("|", 1)
-                species.append((sci.strip(), com.strip()))
+        species, skipped = parse_species_list(args.species)
+    if skipped:
+        print(f"[parse] skipped {skipped} malformed line(s)", file=sys.stderr)
     if not species:
         print("error: no species resolved", file=sys.stderr)
         return 2
@@ -167,7 +208,7 @@ def main() -> int:
         if not ek:
             print("error: --ebird-region requires --ebird-key or EBIRD_API_KEY", file=sys.stderr)
             return 2
-        print(f"[ebird] filtering {len(species)} species against region {args.ebird_region}…")
+        print(f"[ebird] filtering {len(species)} species against {args.ebird_region}…")
         species = ebird_filter(species, args.ebird_region, ek)
 
     if args.limit:
@@ -177,47 +218,35 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
 
     total = len(species) * len(args.poses)
-    print(f"generating {total} illustrations into {args.out}/")
+    print(f"generating up to {total} illustrations into {args.out}/")
 
-    done = skipped = failed = 0
-    for sci, com in species:
+    done = skipped_existing = failed = 0
+    first_fail = None
+    for idx, (sci, com) in enumerate(species):
         slug = slugify(sci)
         for pose in args.poses:
             fname = f"{slug}.png" if pose == 1 else f"{slug}-{pose}.png"
             path = args.out / fname
             if path.exists() and not args.force:
-                skipped += 1
+                skipped_existing += 1
                 continue
             try:
                 data = gen_one(gemini_key, prompt, sci, com, pose)
                 path.write_bytes(data)
                 done += 1
-                print(f"  ✓ {fname} ({len(data)//1024} KB)")
+                print(f"  [ok]   {fname} ({len(data)//1024} KB)")
             except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as e:
                 failed += 1
-                print(f"  ✗ {fname}: {e}", file=sys.stderr)
-            time.sleep(args.sleep)
+                first_fail = first_fail or fname
+                print(f"  [fail] {fname}: {e}", file=sys.stderr)
+            # Don't sleep after the last species' last pose.
+            if not (idx == len(species) - 1 and pose == args.poses[-1]):
+                time.sleep(args.sleep)
 
-    print(f"\ngenerated {done} · skipped {skipped} · failed {failed}")
+    print(f"\ngenerated {done} · skipped {skipped_existing} · failed {failed}")
+    if first_fail:
+        print(f"first failure: {first_fail} (re-run without --force to retry only the misses)", file=sys.stderr)
     return 0 if failed == 0 else 1
-
-
-def parse_labels_lines(lines: list[str]) -> list[tuple[str, str]]:
-    out = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if "|" in line:
-            sci, com = line.split("|", 1)
-        elif "_" in line:
-            sci, com = line.split("_", 1)
-        elif "," in line:
-            sci, com = line.split(",", 1)
-        else:
-            continue
-        out.append((sci.strip(), com.strip()))
-    return out
 
 
 if __name__ == "__main__":

@@ -1,67 +1,79 @@
 /* AvianVisitors — bird collage frontend.
  *
- * Renders three views over BirdNET-Pi detections:
+ * Three views over BirdNET-Pi detections:
  *   collage  — mask-packed cluster of species illustrations, sized by
- *              count. Layout normalises so all birds always fit on
+ *              count. Layout normalises so every bird always fits on
  *              every viewport.
- *   stats    — per-species histogram across the selected time window.
- *   atlas    — alphabet of all detected species with detail modal.
+ *   stats    — per-species mark on a time × count plot.
+ *   atlas    — grid of every species ever detected, with detail modal.
  *
- * Reads four JSON endpoints exposed by the Pi (PHP shims in ../api/):
- *   GET /api/recent.json?hours=N   — species + counts in window
- *   GET /api/lifelist.json         — all species ever detected
- *   GET /api/firstseen.json        — earliest detection per species
- *   GET /api/timeseries.json?days=D — daily counts per species
+ * Lives at $HOME/BirdNET-Pi/avian/frontend/ on the Pi; the install
+ * symlinks $HOME/BirdNET-Pi/avian → $EXTRACTED/avian, so this file
+ * loads from http://birdnet.local/avian/frontend/apt.js with the
+ * collage at http://birdnet.local/avian/frontend/.
  *
- * Plus two media proxies (also via PHP):
- *   GET /api/img?sci=X[&com=Y]     — bird illustration
- *   GET /api/recording?sci=X       — most-recent mp3
- *   GET /api/spectrogram?sci=X     — matching spectrogram png
- *
- * Local-network deploys ship without auth. The PHP shims accept the
- * X-AvianVisitors-Token header for the optional Cloudflare-forwarded
- * deployment — see ../forwarding/.
+ * All API calls are relative — they target the PHP shims in ../api/
+ * served by BirdNET-Pi's existing Caddy + PHP-FPM stack. No frontend
+ * configuration needed; works out of the box on any BirdNET-Pi host.
  */
 (function () {
   'use strict';
 
-  // ---- Config ----
-  // API_BASE: where the JSON endpoints live. Default '/' works when
-  // Caddy mounts the frontend at the same host as the API. Override
-  // with window.AV_API_BASE if you split origins.
-  var API_BASE = (window.AV_API_BASE || '').replace(/\/$/, '');
-  var IMG_VERSION = '1';   // bump after running scripts/pregen.py
+  // Relative API helpers. Frontend lives at /avian/frontend/; the PHP
+  // shims live at /avian/api/. The router PHP (birdnet-api.php)
+  // dispatches on ?action= to the recent/lifelist/firstseen/timeseries
+  // queries.
+  function api(action, qs) {
+    return '../api/birdnet-api.php?action=' + action + (qs ? '&' + qs : '');
+  }
+  function media(file, qs) {
+    return '../api/' + file + (qs ? '?' + qs : '');
+  }
 
-  function api(p) { return API_BASE + p; }
+  // Cache-bust query for image URLs. Bump after running pregen.py with
+  // --force so browsers + CDNs drop their cached copies of every bird.
+  var IMG_VERSION = '1';
+
   function readLS(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
   function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function fetchJson(u) { return fetch(u, { cache: 'no-store' }).then(function (r) { return r.json(); }); }
+  function fetchJson(u) {
+    return fetch(u, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + u);
+      return r.json();
+    });
+  }
+  // HTML-escape user-supplied strings before they land in innerHTML.
+  // Species names come from BirdNET-Pi's labels file, which is
+  // user-editable (custom species lists, l18n) — so they're untrusted.
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
 
   // ---- State ----
-  var DATA = {
-    recent: null,     // /api/recent.json?hours=N (refetched on picker change)
-    lifelist: null,   // /api/lifelist.json
-    firstseen: null,  // /api/firstseen.json
-    timeseries: null, // /api/timeseries.json
-  };
+  var DATA = { recent: null, lifelist: null, firstseen: null, timeseries: null };
   var MASKS = null, DIMS = null;
   var currentHours = +readLS('av:window', '24') || 24;
 
-  // ---- Boot: load mask/dim registries, then first data pull ----
+  // ---- Boot ----
   Promise.all([
-    fetchJson(api('/avian/masks.json')).then(function (j) { MASKS = j; }),
-    fetchJson(api('/avian/dims.json')).then(function (j) { DIMS = j; }),
+    fetchJson('./masks.json').then(function (j) { MASKS = j; }),
+    fetchJson('./dims.json').then(function (j) { DIMS = j; }),
   ]).then(function () {
     bindUI();
     refreshAll();
-    setInterval(refreshRecent, 60000);   // poll for new detections every min
-  }).catch(function (e) { console.error('boot failed', e); });
+    setInterval(refreshRecent, 60000);
+  }).catch(function (e) {
+    console.error('boot failed', e);
+    var c = document.getElementById('collage');
+    if (c) c.innerHTML = '<p class="empty">collage failed to load: ' + esc(e.message) + '</p>';
+  });
 
-  // ---- UI bindings ----
-  var slider = document.getElementById('slider');
-  var winPick = document.getElementById('winPick');
-  var views = document.querySelectorAll('.view');
+  // ---- UI ----
+  function $(id) { return document.getElementById(id); }
   function syncPill(container) {
+    if (!container) return;
     var pill = container.querySelector('.seg-pill');
     var active = container.querySelector('button[aria-current="true"]');
     if (!pill || !active) return;
@@ -69,11 +81,15 @@
     pill.style.transform = 'translateX(' + active.offsetLeft + 'px)';
   }
   function syncAllPills() {
-    [slider, winPick, document.getElementById('atlasSort')].forEach(function (c) { if (c) syncPill(c); });
+    [$('slider'), $('winPick'), $('atlasSort')].forEach(syncPill);
   }
   function bindUI() {
-    // View slider
-    [].slice.call(slider.querySelectorAll('button')).forEach(function (b) {
+    var slider = $('slider');
+    var winPick = $('winPick');
+    var atlasEl = $('atlasSort');
+    var views = document.querySelectorAll('.view');
+
+    if (slider) [].slice.call(slider.querySelectorAll('button')).forEach(function (b) {
       b.addEventListener('click', function () {
         [].slice.call(slider.querySelectorAll('button')).forEach(function (x) {
           x.setAttribute('aria-current', x === b ? 'true' : 'false');
@@ -86,8 +102,8 @@
         if (i === 2) renderAtlas();
       });
     });
-    // Window picker
-    [].slice.call(winPick.querySelectorAll('button')).forEach(function (b) {
+
+    if (winPick) [].slice.call(winPick.querySelectorAll('button')).forEach(function (b) {
       b.setAttribute('aria-current', (+b.dataset.h === currentHours) ? 'true' : 'false');
       b.addEventListener('click', function () {
         [].slice.call(winPick.querySelectorAll('button')).forEach(function (x) {
@@ -99,9 +115,8 @@
         refreshRecent();
       });
     });
-    // Atlas sort
-    var atlasEl = document.getElementById('atlasSort');
-    [].slice.call(atlasEl.querySelectorAll('button')).forEach(function (b) {
+
+    if (atlasEl) [].slice.call(atlasEl.querySelectorAll('button')).forEach(function (b) {
       b.addEventListener('click', function () {
         [].slice.call(atlasEl.querySelectorAll('button')).forEach(function (x) {
           x.setAttribute('aria-current', x === b ? 'true' : 'false');
@@ -111,16 +126,16 @@
         renderAtlas();
       });
     });
-    // About modal
-    document.getElementById('aboutLink').addEventListener('click', function () {
-      document.getElementById('about-modal').setAttribute('aria-hidden', 'false');
+
+    var aboutLink = $('aboutLink');
+    var aboutModal = $('about-modal');
+    if (aboutLink && aboutModal) {
+      aboutLink.addEventListener('click', function () { aboutModal.setAttribute('aria-hidden', 'false'); });
+    }
+    document.querySelectorAll('#about-modal [data-close]').forEach(function (el) {
+      el.addEventListener('click', function () { aboutModal && aboutModal.setAttribute('aria-hidden', 'true'); });
     });
-    document.querySelectorAll('[data-close]').forEach(function (el) {
-      el.addEventListener('click', function () {
-        document.getElementById('about-modal').setAttribute('aria-hidden', 'true');
-      });
-    });
-    // Resize: re-pack collage and re-pill
+
     var rT;
     window.addEventListener('resize', function () {
       clearTimeout(rT);
@@ -137,10 +152,10 @@
   function refreshAll() {
     var h = currentHours;
     return Promise.all([
-      fetchJson(api('/api/lifelist.json')).catch(function () { return null; }),
-      fetchJson(api('/api/firstseen.json')).catch(function () { return null; }),
-      fetchJson(api('/api/timeseries.json?days=30')).catch(function () { return null; }),
-      fetchJson(api('/api/recent.json?hours=' + h)).catch(function () { return null; }),
+      fetchJson(api('lifelist')).catch(function () { return null; }),
+      fetchJson(api('firstseen')).catch(function () { return null; }),
+      fetchJson(api('timeseries', 'days=30')).catch(function () { return null; }),
+      fetchJson(api('recent', 'hours=' + h)).catch(function () { return null; }),
     ]).then(function (parts) {
       DATA.lifelist = parts[0];
       DATA.firstseen = parts[1];
@@ -152,7 +167,7 @@
   }
   function refreshRecent() {
     var h = currentHours;
-    return fetchJson(api('/api/recent.json?hours=' + h)).then(function (j) {
+    return fetchJson(api('recent', 'hours=' + h)).then(function (j) {
       if (h !== currentHours) return;
       DATA.recent = j;
       renderCollageFromData();
@@ -160,9 +175,10 @@
     }).catch(function () {});
   }
 
-  // ---- Mask + slug helpers ----
+  // ---- Slug + mask helpers ----
   var maskCache = {};
   function loadMask(slug) {
+    if (!MASKS) return null;
     if (maskCache[slug]) return maskCache[slug];
     var rec = MASKS[slug];
     if (!rec) return null;
@@ -182,17 +198,16 @@
     return sci.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   }
   function aspect(sci) {
-    var d = DIMS[slugify(sci)];
+    var d = DIMS && DIMS[slugify(sci)];
     return d ? d[0] / d[1] : 1.4;
+  }
+  function imgUrl(sci, com) {
+    return media('cutout.php', 'sci=' + encodeURIComponent(sci) +
+      (com ? '&com=' + encodeURIComponent(com) : '') +
+      '&v=' + IMG_VERSION);
   }
 
   // ---- Collage layout (mask-aware, viewport-budget) ----
-  //
-  // Each species ships a low-res alpha mask. We maintain an occupancy
-  // grid at viewport resolution; for each tile we spiral outward from
-  // the cluster center and pick the closest non-overlapping placement.
-  // Total area is normalised so the entire cluster fits any viewport,
-  // and we iterate shrink+repack until every bird lands on-screen.
   function tuning(n) {
     return {
       packingBudgetFrac: n <= 4 ? 0.46 : n <= 12 ? 0.40 : n <= 24 ? 0.34 : 0.28,
@@ -278,14 +293,17 @@
   }
 
   function renderCollageFromData() {
-    var items = (DATA.recent && DATA.recent.species) || [];
-    renderCollage(items);
+    renderCollage((DATA.recent && DATA.recent.species) || []);
   }
   function renderCollage(items) {
-    var collage = document.getElementById('collage');
+    var collage = $('collage');
+    if (!collage) return;
     collage.innerHTML = '';
     if (!items.length) {
-      collage.innerHTML = '<p class="empty">no birds heard in this window.</p>';
+      var p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'no birds heard in this window.';
+      collage.appendChild(p);
       return;
     }
     var W = collage.clientWidth, H = collage.clientHeight;
@@ -297,12 +315,14 @@
     var minArea = vpArea * T.minTileAreaFrac;
 
     var tiles = items.map(function (s) {
-      var slug = slugify(s.sci);
+      var slug = slugify(s.sci || '');
       var mask = loadMask(slug);
       if (!mask) return null;
       var n = +s.n; if (!n || isNaN(n)) n = 1;
       return { mask: mask, data: s, ar: aspect(s.sci), score: Math.pow(Math.max(1, n), T.countExp) };
     }).filter(Boolean);
+
+    if (!tiles.length) { collage.innerHTML = ''; return; }
 
     var sumScore = tiles.reduce(function (a, t) { return a + t.score; }, 0) || 1;
     tiles.forEach(function (t) { t.area = Math.max(minArea, budget * t.score / sumScore); });
@@ -353,30 +373,35 @@
       placed.forEach(function (t) { if (t.x > -1000) { t.x += dx; t.y += dy; } });
     }
 
+    // Build tiles via createElement / textContent / setAttribute so user-
+    // editable species names from labels.txt can't smuggle markup.
     placed.forEach(function (t) {
       var s = t.data;
-      var img = api('/api/img?sci=' + encodeURIComponent(s.sci) +
-                    (s.com ? '&com=' + encodeURIComponent(s.com) : '') +
-                    '&v=' + IMG_VERSION);
+      var label = s.com || s.sci;
       var btn = document.createElement('button');
       btn.className = 'gtile';
       btn.type = 'button';
-      btn.setAttribute('data-sci', s.sci);
-      btn.setAttribute('aria-label', s.com || s.sci);
-      btn.title = (s.com || s.sci) + ' · ' + (+s.n || 0) + ' calls';
+      btn.dataset.sci = s.sci;
+      btn.setAttribute('aria-label', label);
+      btn.title = label + ' · ' + (+s.n || 0) + ' calls';
       btn.style.left = t.x + 'px';
       btn.style.top = t.y + 'px';
       btn.style.width = t.fullW + 'px';
       btn.style.height = t.fullH + 'px';
-      btn.innerHTML = '<img loading="lazy" decoding="async" src="' + img + '" alt="' + (s.com || s.sci) + '">';
+      var img = document.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = label;
+      img.src = imgUrl(s.sci, s.com);
+      btn.appendChild(img);
       btn.addEventListener('click', function () { openDetail(s); });
       collage.appendChild(btn);
     });
   }
 
-  // ---- Stats: per-species histogram with last-seen positioning ----
+  // ---- Stats ----
   function drawHistograms() {
-    var tl = document.getElementById('statsTimeline');
+    var tl = $('statsTimeline');
     if (!tl) return;
     var sp = ((DATA.recent && DATA.recent.species) || []).slice();
     if (!sp.length) { tl.innerHTML = '<div class="stats-tl-empty">no detections in this window</div>'; return; }
@@ -388,24 +413,38 @@
     var cap = Math.max(4, Math.floor(W / 28));
     if (sp.length > cap) sp = sp.slice(0, cap);
     var maxN = sp.reduce(function (m, s) { return Math.max(m, +s.n || 0); }, 1);
-    var html = '<div class="stats-tl-plot">';
+    tl.innerHTML = '';
+    var plot = document.createElement('div');
+    plot.className = 'stats-tl-plot';
     sp.forEach(function (s) {
       var ts = Date.parse((s.last_seen || '').replace(' ', 'T'));
       var leftPct = isNaN(ts) ? 50 : ((Math.max(windowStart, Math.min(now, ts)) - windowStart) / windowSpan) * 100;
       var n = +s.n || 0;
       var bottomPct = (n / maxN) * 50;
-      html += '<div class="stats-tl-mark" style="left:' + leftPct.toFixed(1) + '%;bottom:' + bottomPct.toFixed(1) + '%" data-sci="' + s.sci + '" title="' + (s.com || s.sci) + ' · ' + n + ' calls"></div>';
+      var mark = document.createElement('div');
+      mark.className = 'stats-tl-mark';
+      mark.style.left = leftPct.toFixed(1) + '%';
+      mark.style.bottom = bottomPct.toFixed(1) + '%';
+      mark.dataset.sci = s.sci;
+      mark.title = (s.com || s.sci) + ' · ' + n + ' calls';
+      plot.appendChild(mark);
     });
-    html += '</div>';
-    tl.innerHTML = html;
+    tl.appendChild(plot);
   }
 
-  // ---- Atlas: gridded alphabet of all species ----
+  // ---- Atlas ----
   function renderAtlas() {
-    var list = document.getElementById('atlasList');
+    var list = $('atlasList');
     if (!list) return;
     var sp = ((DATA.lifelist && DATA.lifelist.species) || []).slice();
-    if (!sp.length) { list.innerHTML = '<p class="empty">no species yet — atlas fills in as the Pi detects birds.</p>'; return; }
+    if (!sp.length) {
+      var p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'no species yet — atlas fills in as the Pi detects birds.';
+      list.innerHTML = '';
+      list.appendChild(p);
+      return;
+    }
     var sort = readLS('av:atlasSort', 'count');
     if (sort === 'count') sp.sort(function (a, b) { return (+b.n || 0) - (+a.n || 0); });
     else if (sort === 'recent') sp.sort(function (a, b) {
@@ -414,49 +453,66 @@
     else sp.sort(function (a, b) {
       return Date.parse((a.first_seen || '').replace(' ', 'T')) - Date.parse((b.first_seen || '').replace(' ', 'T'));
     });
-    list.innerHTML = sp.map(function (s) {
-      var img = api('/api/img?sci=' + encodeURIComponent(s.sci) +
-                    (s.com ? '&com=' + encodeURIComponent(s.com) : '') +
-                    '&v=' + IMG_VERSION);
-      return '<button class="atlas-card" data-sci="' + s.sci + '">' +
-        '<img loading="lazy" decoding="async" src="' + img + '" alt="' + (s.com || s.sci) + '">' +
-        '<span class="atlas-name">' + (s.com || s.sci) + '</span>' +
-        '<span class="atlas-count">' + (+s.n || 0) + '</span>' +
-        '</button>';
-    }).join('');
-    [].slice.call(list.querySelectorAll('.atlas-card')).forEach(function (b) {
-      b.addEventListener('click', function () { openDetail({ sci: b.dataset.sci }); });
+    list.innerHTML = '';
+    sp.forEach(function (s) {
+      var btn = document.createElement('button');
+      btn.className = 'atlas-card';
+      btn.type = 'button';
+      btn.dataset.sci = s.sci;
+      var img = document.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = s.com || s.sci;
+      img.src = imgUrl(s.sci, s.com);
+      var name = document.createElement('span');
+      name.className = 'atlas-name';
+      name.textContent = s.com || s.sci;
+      var count = document.createElement('span');
+      count.className = 'atlas-count';
+      count.textContent = String(+s.n || 0);
+      btn.appendChild(img);
+      btn.appendChild(name);
+      btn.appendChild(count);
+      btn.addEventListener('click', function () { openDetail(s); });
+      list.appendChild(btn);
     });
   }
 
-  // ---- Detail modal (basic — opens recording + spectrogram for a species) ----
+  // ---- Detail modal ----
   function openDetail(s) {
     var sci = s.sci || s;
-    // Lookup full record from lifelist if available
     var rec = ((DATA.lifelist && DATA.lifelist.species) || []).find(function (x) { return x.sci === sci; }) || s;
-    var img = api('/api/img?sci=' + encodeURIComponent(sci) +
-                  (rec.com ? '&com=' + encodeURIComponent(rec.com) : '') +
-                  '&v=' + IMG_VERSION);
-    var rec_url = api('/api/recording?sci=' + encodeURIComponent(sci));
-    var spec_url = api('/api/spectrogram?sci=' + encodeURIComponent(sci));
-    var modal = document.getElementById('detail-modal');
+    var label = rec.com || sci;
+
+    var modal = $('detail-modal');
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'detail-modal';
       modal.setAttribute('role', 'dialog');
       document.body.appendChild(modal);
     }
+    // Single innerHTML for the chrome (no user content), then build the
+    // user-content elements via createElement so labels are safe.
     modal.innerHTML =
       '<div class="modal-backdrop" data-close="1"></div>' +
       '<div class="detail-card">' +
       '  <button type="button" class="modal-close" data-close="1" aria-label="close">×</button>' +
-      '  <img class="detail-img" src="' + img + '" alt="' + (rec.com || sci) + '">' +
-      '  <h2 class="detail-title">' + (rec.com || sci) + '</h2>' +
-      '  <p class="detail-sci"><em>' + sci + '</em></p>' +
-      '  <p class="detail-stats">' + (+rec.n || 0) + ' calls · last heard ' + (rec.last_seen || '—') + '</p>' +
-      '  <audio class="detail-audio" controls src="' + rec_url + '"></audio>' +
-      '  <img class="detail-spec" src="' + spec_url + '" alt="spectrogram">' +
+      '  <img class="detail-img" alt="">' +
+      '  <h2 class="detail-title"></h2>' +
+      '  <p class="detail-sci"><em></em></p>' +
+      '  <p class="detail-stats"></p>' +
+      '  <audio class="detail-audio" controls></audio>' +
+      '  <img class="detail-spec" alt="spectrogram">' +
       '</div>';
+    var card = modal.querySelector('.detail-card');
+    card.querySelector('.detail-img').src = imgUrl(sci, rec.com);
+    card.querySelector('.detail-img').alt = label;
+    card.querySelector('.detail-title').textContent = label;
+    card.querySelector('.detail-sci em').textContent = sci;
+    card.querySelector('.detail-stats').textContent =
+      (+rec.n || 0) + ' calls · last heard ' + (rec.last_seen || '—');
+    card.querySelector('.detail-audio').src = media('recording.php', 'sci=' + encodeURIComponent(sci));
+    card.querySelector('.detail-spec').src = media('spectrogram.php', 'sci=' + encodeURIComponent(sci));
     modal.setAttribute('aria-hidden', 'false');
     modal.querySelectorAll('[data-close]').forEach(function (el) {
       el.addEventListener('click', function () { modal.setAttribute('aria-hidden', 'true'); });

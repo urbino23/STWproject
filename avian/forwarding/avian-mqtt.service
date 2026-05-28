@@ -4,7 +4,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/%i/avian-mqtt.py
+# Edit User= and the ExecStart path to match your Pi's username if
+# you didn't install BirdNET-Pi as the `birdnet` user.
+User=birdnet
+ExecStart=/usr/bin/python3 %h/avian-mqtt.py
 Restart=on-failure
 RestartSec=10
 

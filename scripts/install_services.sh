@@ -69,6 +69,8 @@ create_necessary_dirs() {
   sudo -u ${USER} ln -fs $my_dir/include_species_list.txt $my_dir/scripts
   sudo -u ${USER} ln -fs $my_dir/whitelist_species_list.txt $my_dir/scripts
   sudo -u ${USER} ln -fs $my_dir/homepage/* ${EXTRACTED}
+  # AvianVisitors overlay — served at http://birdnet.local/avian/
+  [ -d $my_dir/avian ] && sudo -u ${USER} ln -fs $my_dir/avian ${EXTRACTED}/avian
   sudo -u ${USER} ln -fs $my_dir/model/labels.txt ${my_dir}/scripts
   sudo -u ${USER} ln -fs $my_dir/scripts ${EXTRACTED}
   sudo -u ${USER} ln -fs $my_dir/scripts/play.php ${EXTRACTED}

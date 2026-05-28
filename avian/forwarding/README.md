@@ -1,6 +1,6 @@
 # Optional: forwarding the collage off your local network
 
-Default install hosts the collage at `http://birdnet.local/collage/` on
+Default install hosts the collage at `http://birdnet.local/avian/` on
 your LAN with no auth. If you want it accessible from anywhere — or
 piped into Home Assistant / MQTT — pick one of the recipes below.
 
@@ -8,18 +8,17 @@ Each recipe is independent. Skip what you don't need.
 
 ---
 
-## 1. Cloudflare Tunnel (recommended for public access)
+## 1. Cloudflare Tunnel — public HTTPS, no port forwarding
 
-Gives you a public HTTPS URL with no port forwarding and no exposed
-home IP. Free Cloudflare account required.
+Free Cloudflare account required.
 
-Install `cloudflared` on the Pi:
+Install `cloudflared`:
 
 ```bash
-sudo mkdir -p /usr/share/keyrings
+sudo apt install -y lsb-release
 curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
   | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main' \
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
   | sudo tee /etc/apt/sources.list.d/cloudflared.list
 sudo apt update && sudo apt install -y cloudflared
 ```
@@ -29,28 +28,21 @@ Authenticate + create the tunnel:
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create birds
-```
-
-Add a public route — pick a hostname on a zone you own:
-
-```bash
 cloudflared tunnel route dns birds birds.your-domain.com
 ```
 
-Configure the tunnel to point at the local Caddy:
+Configure + start the tunnel:
 
 ```bash
-sudo cp avian/forwarding/cloudflared.yml /etc/cloudflared/config.yml
-# edit /etc/cloudflared/config.yml — set `tunnel:` to your tunnel UUID
+sudo cp ~/BirdNET-Pi/avian/forwarding/cloudflared.yml /etc/cloudflared/config.yml
+# Edit /etc/cloudflared/config.yml — set `tunnel:` to your tunnel UUID
 sudo cloudflared service install
 sudo systemctl restart cloudflared
 ```
 
-**Adding password protection on the public URL.** With Cloudflare in
-front, gate the public endpoint via Cloudflare Access (zero-trust
-free tier supports up to 50 users) — see Cloudflare docs. The local
-LAN URL remains unprotected. If you'd rather use HTTP Basic auth on
-Caddy itself, see [forwarding/caddy-auth.caddy](caddy-auth.caddy).
+To password-protect the public URL, set up Cloudflare Access (free
+tier: up to 50 users). The LAN URL stays open. If you'd rather use HTTP
+Basic auth, see [`caddy-auth.caddy`](caddy-auth.caddy).
 
 ---
 
@@ -60,13 +52,11 @@ Add to `configuration.yaml`:
 
 ```yaml
 rest:
-  - resource: http://birdnet.local/api/recent.json?hours=1
+  - resource: http://birdnet.local/avian/api/birdnet-api.php?action=recent&hours=1
     scan_interval: 60
     sensor:
       - name: "Latest Bird"
-        value_template: >
-          {% set top = value_json.species | sort(attribute='last_seen', reverse=true) | first %}
-          {{ top.com if top else 'none' }}
+        value_template: "{{ value_json.species[0].com if value_json.species else 'none' }}"
         json_attributes_path: "$.species[0]"
         json_attributes:
           - sci
@@ -75,25 +65,25 @@ rest:
           - best_conf
 ```
 
-Use the sensor in automations — flash a light when a new species is
-heard, etc.
+`birdnet-api.php?action=recent` already returns `species` ordered by
+count desc; if you want most-recent first, replace the value_template
+with a sort filter.
 
 ---
 
 ## 3. MQTT — fan out detections to other services
 
-If you already run an MQTT broker, publish every new detection.
-Install `paho-mqtt` and run the bridge:
-
 ```bash
 sudo pip3 install paho-mqtt --break-system-packages
-cp avian/forwarding/mqtt-bridge.py ~/avian-mqtt.py
-# edit ~/avian-mqtt.py — broker host, topic prefix
-sudo cp avian/forwarding/avian-mqtt.service /etc/systemd/system/
+cp ~/BirdNET-Pi/avian/forwarding/mqtt-bridge.py ~/avian-mqtt.py
+# Edit ~/avian-mqtt.py — broker host, topic prefix, credentials
+sudo cp ~/BirdNET-Pi/avian/forwarding/avian-mqtt.service /etc/systemd/system/
+# Edit /etc/systemd/system/avian-mqtt.service — set User= to your username
 sudo systemctl daemon-reload
 sudo systemctl enable --now avian-mqtt
 ```
 
-The bridge polls `/api/recent.json?hours=1` once a minute and
-publishes new species under `birdnet/<slug>` with the full record as
-JSON payload.
+The bridge polls `/avian/api/birdnet-api.php?action=recent&hours=1`
+once a minute and publishes new species under `birdnet/<slug>` with the
+full record as a JSON payload. Dedup is in-memory only — downstream
+consumers should be idempotent.
