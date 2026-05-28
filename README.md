@@ -43,7 +43,7 @@ curl -s https://raw.githubusercontent.com/Twarner491/AvianVisitors/avian-visitor
 
 Clones this fork, installs BirdNET-Pi, symlinks the AvianVisitors overlay into the Caddy web root. Takes 20-40 minutes. Reboots when done.
 
-Collage: `http://birdnet.local/avian/`. Stock BirdNET-Pi UI: `http://birdnet.local/`.
+Collage: `http://birdnet.local/`. Stock BirdNET-Pi UI: `http://birdnet.local/index.php` (also linked from the menu drawer).
 
 ---
 

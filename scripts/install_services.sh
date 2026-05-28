@@ -69,8 +69,20 @@ create_necessary_dirs() {
   sudo -u ${USER} ln -fs $my_dir/include_species_list.txt $my_dir/scripts
   sudo -u ${USER} ln -fs $my_dir/whitelist_species_list.txt $my_dir/scripts
   sudo -u ${USER} ln -fs $my_dir/homepage/* ${EXTRACTED}
-  # AvianVisitors overlay — served at http://birdnet.local/avian/
-  [ -d $my_dir/avian ] && sudo -u ${USER} ln -fs $my_dir/avian ${EXTRACTED}/avian
+  # AvianVisitors overlay. The avian/ symlink keeps assets + PHP shims
+  # reachable at /avian/. The five frontend files at the EXTRACTED root
+  # make the collage the default index for http://birdnet.local/ -
+  # Caddy serves index.html before index.php, so BirdNET-Pi's stock UI
+  # moves to http://birdnet.local/index.php (still linked from the
+  # AvianVisitors menu drawer).
+  if [ -d $my_dir/avian ]; then
+    sudo -u ${USER} ln -fs $my_dir/avian ${EXTRACTED}/avian
+    sudo -u ${USER} ln -fs $my_dir/avian/frontend/index.html ${EXTRACTED}/index.html
+    sudo -u ${USER} ln -fs $my_dir/avian/frontend/styles.css ${EXTRACTED}/styles.css
+    sudo -u ${USER} ln -fs $my_dir/avian/frontend/apt.js    ${EXTRACTED}/apt.js
+    sudo -u ${USER} ln -fs $my_dir/avian/frontend/masks.json ${EXTRACTED}/masks.json
+    sudo -u ${USER} ln -fs $my_dir/avian/frontend/dims.json  ${EXTRACTED}/dims.json
+  fi
   sudo -u ${USER} ln -fs $my_dir/model/labels.txt ${my_dir}/scripts
   sudo -u ${USER} ln -fs $my_dir/scripts ${EXTRACTED}
   sudo -u ${USER} ln -fs $my_dir/scripts/play.php ${EXTRACTED}

@@ -25,8 +25,9 @@ if (getenv('AV_REQUIRE_AUTH') === '1' && empty($_SERVER['HTTP_AUTHORIZATION'])) 
 
 echo json_encode([
     'items' => [
-        // Stock BirdNET-Pi UI (sits at the site root)
-        ['label' => 'birdnet-pi',  'href' => '/',                            'native' => false],
+        // Stock BirdNET-Pi UI (AvianVisitors took over `/`, so the stock
+        // UI is reachable at /index.php directly)
+        ['label' => 'birdnet-pi',  'href' => '/index.php',                   'native' => false],
         // BirdNET-Pi log view (php served at /views.php)
         ['label' => 'logs',        'href' => '/views.php?view=Log+Out',      'native' => false],
         ['label' => 'system',      'href' => '/views.php?view=Services',     'native' => false],

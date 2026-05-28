@@ -424,7 +424,7 @@
       // com flows through so the worker's JIT Gemini job uses the right
       // common name in its prompt for a freshly-detected species.
       // &v=IMG_VERSION busts CF edge cache when we re-render any species.
-      var img = '../api/cutout.php?sci=' + encodeURIComponent(s.sci) +
+      var img = './avian/api/cutout.php?sci=' + encodeURIComponent(s.sci) +
         (s.com ? '&com=' + encodeURIComponent(s.com) : '') +
         '&v=' + IMG_VERSION;
       var btn = document.createElement('button');
@@ -596,11 +596,11 @@
   // load and by refreshRecent() when the window picker changes.
   var STATS_DAYS = 30;
   var DATA = {
-    stats: null,        // ../api/birdnet-api.php?action=stats (totals/today/week/last_hour/started)
-    lifelist: null,     // ../api/birdnet-api.php?action=lifelist (every species ever detected)
-    timeseries: null,   // ../api/birdnet-api.php?action=timeseries (daily + hourly aggregates)
-    firstseen: null,    // ../api/birdnet-api.php?action=firstseen (newest lifelist additions)
-    recent: null,       // ../api/birdnet-api.php?action=recent&hours=N (refetched on picker change)
+    stats: null,        // ./avian/api/birdnet-api.php?action=stats (totals/today/week/last_hour/started)
+    lifelist: null,     // ./avian/api/birdnet-api.php?action=lifelist (every species ever detected)
+    timeseries: null,   // ./avian/api/birdnet-api.php?action=timeseries (daily + hourly aggregates)
+    firstseen: null,    // ./avian/api/birdnet-api.php?action=firstseen (newest lifelist additions)
+    recent: null,       // ./avian/api/birdnet-api.php?action=recent&hours=N (refetched on picker change)
   };
 
   // Derived chart arrays, backfilled so 30 buckets always exist.
@@ -839,7 +839,7 @@
     var recent = DATA.recent || { species: [] };
     var firstseen = DATA.firstseen || { species: [] };
 
-    // By Period — pulled directly from ../api/birdnet-api.php?action=stats so the numbers
+    // By Period — pulled directly from ./avian/api/birdnet-api.php?action=stats so the numbers
     // are authoritative (BirdNET-Pi's own counts).
     var last_hour = (stats.last_hour && stats.last_hour.detections) || 0;
     var today_det = (stats.today && stats.today.detections) || 0;
@@ -851,7 +851,7 @@
       + liRow('WEEK',  'last 7 days', fmtN(week_det))
       + liRow('ALL',   'all time',    fmtN(all_det));
 
-    // Top Species — top 5 species in the current window. ../api/birdnet-api.php?action=recent
+    // Top Species — top 5 species in the current window. ./avian/api/birdnet-api.php?action=recent
     // already returns species sorted by last_seen DESC; re-sort by count.
     var ranked = (recent.species || [])
       .slice()
@@ -963,11 +963,11 @@
     grid.innerHTML = species.map(function (s) {
       var total = +s.total || 0;
       var win = winBySci[s.sci] || 0;
-      var sketchSrc = '../api/cutout.php?sci=' + encodeURIComponent(s.sci) +
+      var sketchSrc = './avian/api/cutout.php?sci=' + encodeURIComponent(s.sci) +
         (s.com ? '&com=' + encodeURIComponent(s.com) : '') +
         '&v=' + SKETCH_VERSION;
-      var audioSrc = '../api/recording.php?sci=' + encodeURIComponent(s.sci);
-      var spectroSrc = '../api/spectrogram.php?sci=' + encodeURIComponent(s.sci);
+      var audioSrc = './avian/api/recording.php?sci=' + encodeURIComponent(s.sci);
+      var spectroSrc = './avian/api/spectrogram.php?sci=' + encodeURIComponent(s.sci);
       // The "all time" window makes the windowed count identical to the
       // all-time count — collapse to a single stat rather than print the
       // same number twice. Otherwise label the count with its span.
@@ -1130,7 +1130,7 @@
     // lands later — we discard the stale response so the collage
     // never reverts to a different window.
     var forHours = currentHours;
-    return fetchJson('../api/birdnet-api.php?action=recent&hours=' + forHours)
+    return fetchJson('./avian/api/birdnet-api.php?action=recent&hours=' + forHours)
       .then(function (j) {
         if (forHours !== currentHours) return; // window changed mid-flight
         DATA.recent = j; renderWindowDependent();
@@ -1140,11 +1140,11 @@
   function refreshAll() {
     var forHours = currentHours;
     return Promise.all([
-      fetchJson('../api/birdnet-api.php?action=stats').catch(function () { return null; }),
-      fetchJson('../api/birdnet-api.php?action=lifelist').catch(function () { return null; }),
-      fetchJson('../api/birdnet-api.php?action=timeseries&days=30').catch(function () { return null; }),
-      fetchJson('../api/birdnet-api.php?action=firstseen&limit=10').catch(function () { return null; }),
-      fetchJson('../api/birdnet-api.php?action=recent&hours=' + forHours).catch(function () { return null; }),
+      fetchJson('./avian/api/birdnet-api.php?action=stats').catch(function () { return null; }),
+      fetchJson('./avian/api/birdnet-api.php?action=lifelist').catch(function () { return null; }),
+      fetchJson('./avian/api/birdnet-api.php?action=timeseries&days=30').catch(function () { return null; }),
+      fetchJson('./avian/api/birdnet-api.php?action=firstseen&limit=10').catch(function () { return null; }),
+      fetchJson('./avian/api/birdnet-api.php?action=recent&hours=' + forHours).catch(function () { return null; }),
     ]).then(function (parts) {
       DATA.stats = parts[0];
       DATA.lifelist = parts[1];
@@ -1223,7 +1223,7 @@
   // worker accepts the cookie we skip the lock screen; if it 401s we
   // show the lock as usual.
   function tryAutoUnlock() {
-    fetch('../api/menu.php', { credentials: 'same-origin' }).then(function (r) {
+    fetch('./avian/api/menu.php', { credentials: 'same-origin' }).then(function (r) {
       if (r.status === 200) {
         return r.json().then(function (j) { renderMenu(j.items || []); });
       }
@@ -1247,7 +1247,7 @@
       if (r.status === 200) {
         // Cookie is set — fetch the drawer JSON the same way every
         // protected endpoint will be called from now on (cookie-based).
-        return fetch('../api/menu.php', { credentials: 'same-origin' })
+        return fetch('./avian/api/menu.php', { credentials: 'same-origin' })
           .then(function (m) { return m.json(); })
           .then(function (j) { renderMenu(j.items || []); });
       } else if (r.status === 401) {
@@ -1716,7 +1716,7 @@
     var sp = ((DATA.lifelist && DATA.lifelist.species) || [])
       .find(function (s) { return s.sci === sci; });
     var com = sp ? (sp.com || '') : '';
-    var base = '../api/cutout.php?sci=' + encodeURIComponent(sci) +
+    var base = './avian/api/cutout.php?sci=' + encodeURIComponent(sci) +
       (com ? '&com=' + encodeURIComponent(com) : '') +
       '&v=' + SKETCH_VERSION;
     var n = +pose || 1;
@@ -1817,7 +1817,7 @@
     // Species detail (lifelist row + every detection).
     var loadSpecies = SPECIES_CACHE[sci]
       ? Promise.resolve(SPECIES_CACHE[sci])
-      : fetchJson('../api/birdnet-api.php?action=species&sci=' + encodeURIComponent(sci)).then(function (j) {
+      : fetchJson('./avian/api/birdnet-api.php?action=species&sci=' + encodeURIComponent(sci)).then(function (j) {
           SPECIES_CACHE[sci] = j;
           return j;
         });
@@ -2568,7 +2568,7 @@
     }
     var ctx = getSpecCtx();
     if (!ctx) { fail('WebAudio not available'); return; }
-    fetch('../api/recording.php?file=' + encodeURIComponent(file))
+    fetch('./avian/api/recording.php?file=' + encodeURIComponent(file))
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.arrayBuffer();
@@ -2631,7 +2631,7 @@
       prow.classList.add('expanded');
       ensureSpectroImage(prow);
       var strip = prow.querySelector('.rec-spectro');
-      var audio = new Audio('../api/recording.php?file=' + encodeURIComponent(pfile));
+      var audio = new Audio('./avian/api/recording.php?file=' + encodeURIComponent(pfile));
       modalAudio = audio;
       audio.addEventListener('loadedmetadata', function () {
         strip.classList.add('armed');

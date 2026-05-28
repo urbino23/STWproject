@@ -1,6 +1,6 @@
 # Forwarding
 
-Default install hosts the collage at `http://birdnet.local/avian/` on your LAN, no auth. The recipes below are independent. Pick what you need.
+Default install hosts the collage at `http://birdnet.local/` on your LAN, no auth. The recipes below are independent. Pick what you need.
 
 ---
 
