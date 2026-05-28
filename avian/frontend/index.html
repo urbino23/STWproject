@@ -3,45 +3,69 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>apartment birds</title>
-<meta name="description" content="A live bird collage from your apartment window.">
+<title>your birds</title>
+<meta name="description" content="A live bird collage from your window.">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
+<header class="top">
+  <div class="window-pick" id="winPick" role="tablist">
+    <i class="seg-pill" aria-hidden="true"></i>
+    <button data-h="1"       type="button">1H</button>
+    <button data-h="12"      type="button">12H</button>
+    <button data-h="24"      type="button" aria-current="true">24H</button>
+    <button data-h="168"     type="button">7D</button>
+    <button data-h="1000000" type="button">ALL</button>
+  </div>
+</header>
+
 <main class="stage">
   <header class="static-head">
-    <button type="button" class="pre" id="aboutLink">apartment birds</button>
+    <button type="button" class="pre" id="aboutLink">your birds</button>
     <h1 id="staticTitle">Heard Recently</h1>
   </header>
 
   <div class="views" id="views">
-    <section class="view view-collage" data-view="0">
-      <div id="collage" class="collage"></div>
+    <section class="view" id="v0" aria-label="Bird collage">
+      <div class="gcollage" id="collage"></div>
     </section>
-    <section class="view view-stats" data-view="1" hidden>
-      <div id="statsTimeline" class="stats-tl"></div>
-    </section>
-    <section class="view view-atlas" data-view="2" hidden>
-      <div class="atlas-sort" id="atlasSort">
-        <i class="seg-pill" aria-hidden="true"></i>
-        <button type="button" data-sort="count" aria-current="true">most heard</button>
-        <button type="button" data-sort="recent">most recent</button>
-        <button type="button" data-sort="first">first seen</button>
+
+    <section class="view" id="v1" aria-label="Stats">
+      <div class="stats-grid">
+        <div class="stats-timeline" id="statsTimeline"></div>
       </div>
-      <div id="atlasList" class="atlas-list"></div>
+    </section>
+
+    <section class="view" id="v2" aria-label="Atlas">
+      <div class="atlas-controls">
+        <div class="atlas-sort" id="atlasSort" role="tablist" aria-label="sort atlas">
+          <i class="seg-pill" aria-hidden="true"></i>
+          <button data-sort="count"  type="button" aria-current="true" aria-label="most heard">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M2 12 V8"/><path d="M6 12 V5"/><path d="M10 12 V3"/>
+            </svg>
+            <span class="tip">most heard</span>
+          </button>
+          <button data-sort="recent" type="button" aria-label="most recent">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7" cy="7" r="5.2"/><path d="M7 4 V7 L9.2 8.3"/>
+            </svg>
+            <span class="tip">most recent</span>
+          </button>
+          <button data-sort="alpha"  type="button" aria-label="alphabetical">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2.4 11.5 L4 4.5 L5.6 11.5"/><path d="M2.9 9.2 H5.1"/>
+              <path d="M8.2 11.5 V4.5 H10.4 a1.3 1.3 0 0 1 0 2.6 H8.2"/><path d="M8.2 7.1 H10.6 a1.5 1.5 0 0 1 0 3 H8.2"/>
+            </svg>
+            <span class="tip">a → z</span>
+          </button>
+        </div>
+      </div>
+      <div class="atlas-grid" id="atlasGrid"></div>
     </section>
   </div>
 </main>
-
-<div class="window-pick" id="winPick" role="tablist">
-  <i class="seg-pill" aria-hidden="true"></i>
-  <button data-h="1"    type="button">1H</button>
-  <button data-h="12"   type="button">12H</button>
-  <button data-h="24"   type="button" aria-current="true">24H</button>
-  <button data-h="168"  type="button">7D</button>
-  <button data-h="9999999" type="button">ALL</button>
-</div>
 
 <nav class="slider" id="slider" aria-label="View">
   <i class="seg-pill" aria-hidden="true"></i>
@@ -54,9 +78,9 @@
   <div class="modal-backdrop" data-close="1"></div>
   <div class="about-card" role="document">
     <button type="button" class="modal-close" data-close="1" aria-label="close">×</button>
-    <p class="about-eyebrow">apartment birds</p>
-    <h2 id="aboutTitle">The birds outside my window</h2>
-    <p class="about-body">A tiny microphone listens for birds passing the window and identifies them with Cornell's <a href="https://birdnet.cornell.edu/" target="_blank" rel="noopener">BirdNET</a>. Each species shows up as an illustration in the collage - sized by how much it's been heard.</p>
+    <p class="about-eyebrow">your birds</p>
+    <h2 id="aboutTitle">The birds outside your window</h2>
+    <p class="about-body">A tiny microphone identifies every passing bird with Cornell's <a href="https://birdnet.cornell.edu/" target="_blank" rel="noopener">BirdNET</a>. Each species shows up as an illustration in the collage, sized by how often it's been heard.</p>
     <button type="button" class="about-explore" data-close="1">explore the birds →</button>
     <p class="built-by">built with <a href="https://github.com/Twarner491/AvianVisitors" target="_blank" rel="noopener">AvianVisitors</a></p>
   </div>

@@ -4,13 +4,13 @@
  *   collage  - mask-packed cluster of species illustrations, sized by
  *              count. Layout normalises so every bird always fits on
  *              every viewport.
- *   stats    - per-species mark on a time × count plot.
+ *   stats    - per-species mark on a time x count plot.
  *   atlas    - grid of every species ever detected, with detail modal.
  *
- * Lives at $HOME/BirdNET-Pi/avian/frontend/ on the Pi; the install
- * symlinks $HOME/BirdNET-Pi/avian → $EXTRACTED/avian, so this file
- * loads from http://birdnet.local/avian/frontend/apt.js with the
- * collage at http://birdnet.local/avian/frontend/.
+ * Lives at $HOME/BirdNET-Pi/avian/frontend/ on the Pi; install_services.sh
+ * symlinks $HOME/BirdNET-Pi/avian -> $EXTRACTED/avian, so this file loads
+ * from http://birdnet.local/avian/frontend/apt.js with the collage at
+ * http://birdnet.local/avian/ (via the redirect at /avian/index.html).
  *
  * All API calls are relative - they target the PHP shims in ../api/
  * served by BirdNET-Pi's existing Caddy + PHP-FPM stack. No frontend
@@ -19,19 +19,12 @@
 (function () {
   'use strict';
 
-  // Relative API helpers. Frontend lives at /avian/frontend/; the PHP
-  // shims live at /avian/api/. The router PHP (birdnet-api.php)
-  // dispatches on ?action= to the recent/lifelist/firstseen/timeseries
-  // queries.
   function api(action, qs) {
     return '../api/birdnet-api.php?action=' + action + (qs ? '&' + qs : '');
   }
   function media(file, qs) {
     return '../api/' + file + (qs ? '?' + qs : '');
   }
-
-  // Cache-bust query for image URLs. Bump after running pregen.py with
-  // --force so browsers + CDNs drop their cached copies of every bird.
   var IMG_VERSION = '1';
 
   function readLS(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
@@ -42,19 +35,12 @@
       return r.json();
     });
   }
-  // HTML-escape user-supplied strings before they land in innerHTML.
-  // Species names come from BirdNET-Pi's labels file, which is
-  // user-editable (custom species lists, l18n) - so they're untrusted.
-  function esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
 
   // ---- State ----
   var DATA = { recent: null, lifelist: null };
   var MASKS = null, DIMS = null;
   var currentHours = +readLS('av:window', '24') || 24;
+  var currentView = +readLS('av:view', '0') || 0;
 
   // ---- Boot ----
   Promise.all([
@@ -67,7 +53,12 @@
   }).catch(function (e) {
     console.error('boot failed', e);
     var c = document.getElementById('collage');
-    if (c) c.innerHTML = '<p class="empty">collage failed to load: ' + esc(e.message) + '</p>';
+    if (c) {
+      var p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'collage failed to load: ' + e.message;
+      c.appendChild(p);
+    }
   });
 
   // ---- UI ----
@@ -83,24 +74,30 @@
   function syncAllPills() {
     [$('slider'), $('winPick'), $('atlasSort')].forEach(syncPill);
   }
+  function setView(i) {
+    i = Math.max(0, Math.min(2, i));
+    currentView = i;
+    writeLS('av:view', String(i));
+    var views = $('views');
+    if (views) views.style.transform = 'translateX(-' + (i * 100) + '%)';
+    var slider = $('slider');
+    if (slider) {
+      [].slice.call(slider.querySelectorAll('button')).forEach(function (b) {
+        b.setAttribute('aria-current', +b.dataset.i === i ? 'true' : 'false');
+      });
+      syncPill(slider);
+    }
+    if (i === 0) renderCollageFromData();
+    if (i === 1) drawHistograms();
+    if (i === 2) renderAtlas();
+  }
   function bindUI() {
     var slider = $('slider');
     var winPick = $('winPick');
     var atlasEl = $('atlasSort');
-    var views = document.querySelectorAll('.view');
 
     if (slider) [].slice.call(slider.querySelectorAll('button')).forEach(function (b) {
-      b.addEventListener('click', function () {
-        [].slice.call(slider.querySelectorAll('button')).forEach(function (x) {
-          x.setAttribute('aria-current', x === b ? 'true' : 'false');
-        });
-        var i = +b.dataset.i;
-        views.forEach(function (v) { v.hidden = +v.dataset.view !== i; });
-        syncPill(slider);
-        if (i === 0) renderCollageFromData();
-        if (i === 1) drawHistograms();
-        if (i === 2) renderAtlas();
-      });
+      b.addEventListener('click', function () { setView(+b.dataset.i); });
     });
 
     if (winPick) [].slice.call(winPick.querySelectorAll('button')).forEach(function (b) {
@@ -136,6 +133,18 @@
       el.addEventListener('click', function () { aboutModal && aboutModal.setAttribute('aria-hidden', 'true'); });
     });
 
+    // Alpha-mask hover hit-testing for the collage. .gtile is
+    // pointer-events:none so the bounding boxes don't intercept events;
+    // we sample the bird's pixel under the cursor instead.
+    var collageEl = $('collage');
+    if (collageEl) {
+      collageEl.addEventListener('mousemove', function (e) { collageHover(e, collageEl); });
+      collageEl.addEventListener('mouseleave', function () {
+        document.querySelectorAll('.gtile.is-hover').forEach(function (t) { t.classList.remove('is-hover'); });
+      });
+      collageEl.addEventListener('click', function (e) { collageClick(e, collageEl); });
+    }
+
     var rT;
     window.addEventListener('resize', function () {
       clearTimeout(rT);
@@ -143,9 +152,58 @@
         syncAllPills();
         renderCollageFromData();
         drawHistograms();
+        var views = $('views');
+        if (views) views.style.transform = 'translateX(-' + (currentView * 100) + '%)';
       }, 120);
     });
+
+    // Initial view position + pill sync
+    var views = $('views');
+    if (views) views.style.transform = 'translateX(-' + (currentView * 100) + '%)';
+    if (slider) [].slice.call(slider.querySelectorAll('button')).forEach(function (b) {
+      b.setAttribute('aria-current', +b.dataset.i === currentView ? 'true' : 'false');
+    });
     setTimeout(syncAllPills, 60);
+  }
+
+  // ---- Hover hit-testing: find which tile's mask is under the cursor ----
+  // .gtile rectangles overlap, so :hover would light the wrong bird. We
+  // walk the placed tiles topmost-first, transform the cursor into each
+  // tile's mask space, and pick the one whose mask cell is "on".
+  var lastHoverTile = null;
+  function hitTest(e, container) {
+    var rect = container.getBoundingClientRect();
+    var x = e.clientX - rect.left, y = e.clientY - rect.top;
+    var tiles = container.querySelectorAll('.gtile');
+    for (var i = tiles.length - 1; i >= 0; i--) {
+      var t = tiles[i];
+      var bx = t.offsetLeft, by = t.offsetTop, bw = t.offsetWidth, bh = t.offsetHeight;
+      if (x < bx || x > bx + bw || y < by || y > by + bh) continue;
+      var slug = t.dataset.slug;
+      var mask = MASKS && MASKS[slug];
+      if (!mask) return t;
+      var mx = ((x - bx) / bw * mask.w) | 0;
+      var my = ((y - by) / bh * mask.h) | 0;
+      var idx = my * mask.w + mx;
+      var byte = atob(mask.bits).charCodeAt(idx >> 3);
+      if ((byte >> (7 - (idx & 7))) & 1) return t;
+    }
+    return null;
+  }
+  function collageHover(e, container) {
+    var hit = hitTest(e, container);
+    if (hit === lastHoverTile) return;
+    if (lastHoverTile) lastHoverTile.classList.remove('is-hover');
+    if (hit) hit.classList.add('is-hover');
+    lastHoverTile = hit;
+    container.style.cursor = hit ? 'pointer' : 'default';
+  }
+  function collageClick(e, container) {
+    var hit = hitTest(e, container);
+    if (!hit) return;
+    var sci = hit.dataset.sci;
+    var record = ((DATA.recent && DATA.recent.species) || []).find(function (s) { return s.sci === sci; });
+    if (record) openDetail(record);
   }
 
   // ---- Data fetch ----
@@ -159,6 +217,7 @@
       if (parts[1] && h === currentHours) DATA.recent = parts[1];
       renderCollageFromData();
       drawHistograms();
+      if (currentView === 2) renderAtlas();
     });
   }
   function refreshRecent() {
@@ -315,10 +374,10 @@
       var mask = loadMask(slug);
       if (!mask) return null;
       var n = +s.n; if (!n || isNaN(n)) n = 1;
-      return { mask: mask, data: s, ar: aspect(s.sci), score: Math.pow(Math.max(1, n), T.countExp) };
+      return { mask: mask, data: s, slug: slug, ar: aspect(s.sci), score: Math.pow(Math.max(1, n), T.countExp) };
     }).filter(Boolean);
 
-    if (!tiles.length) { collage.innerHTML = ''; return; }
+    if (!tiles.length) return;
 
     var sumScore = tiles.reduce(function (a, t) { return a + t.score; }, 0) || 1;
     tiles.forEach(function (t) { t.area = Math.max(minArea, budget * t.score / sumScore); });
@@ -369,8 +428,6 @@
       placed.forEach(function (t) { if (t.x > -1000) { t.x += dx; t.y += dy; } });
     }
 
-    // Build tiles via createElement / textContent / setAttribute so user-
-    // editable species names from labels.txt can't smuggle markup.
     placed.forEach(function (t) {
       var s = t.data;
       var label = s.com || s.sci;
@@ -378,6 +435,7 @@
       btn.className = 'gtile';
       btn.type = 'button';
       btn.dataset.sci = s.sci;
+      btn.dataset.slug = t.slug;
       btn.setAttribute('aria-label', label);
       btn.title = label + ' · ' + (+s.n || 0) + ' calls';
       btn.style.left = t.x + 'px';
@@ -390,17 +448,23 @@
       img.alt = label;
       img.src = imgUrl(s.sci, s.com);
       btn.appendChild(img);
-      btn.addEventListener('click', function () { openDetail(s); });
       collage.appendChild(btn);
     });
   }
 
-  // ---- Stats ----
+  // ---- Stats: per-species mark on a time x count plot ----
   function drawHistograms() {
     var tl = $('statsTimeline');
     if (!tl) return;
     var sp = ((DATA.recent && DATA.recent.species) || []).slice();
-    if (!sp.length) { tl.innerHTML = '<div class="stats-tl-empty">no detections in this window</div>'; return; }
+    if (!sp.length) {
+      tl.innerHTML = '';
+      var p = document.createElement('div');
+      p.className = 'stats-tl-empty';
+      p.textContent = 'no detections in this window';
+      tl.appendChild(p);
+      return;
+    }
     var now = Date.now();
     var windowStart = currentHours >= 1000000 ? now - 90 * 24 * 3600000 : now - currentHours * 3600000;
     var windowSpan = Math.max(1, now - windowStart);
@@ -428,49 +492,72 @@
     tl.appendChild(plot);
   }
 
-  // ---- Atlas ----
+  // ---- Atlas: grid of bird-card per species ----
   function renderAtlas() {
-    var list = $('atlasList');
-    if (!list) return;
+    var grid = $('atlasGrid');
+    if (!grid) return;
     var sp = ((DATA.lifelist && DATA.lifelist.species) || []).slice();
+    grid.innerHTML = '';
     if (!sp.length) {
-      var p = document.createElement('p');
-      p.className = 'empty';
-      p.textContent = 'no species yet - atlas fills in as the Pi detects birds.';
-      list.innerHTML = '';
-      list.appendChild(p);
+      var empty = document.createElement('div');
+      empty.className = 'atlas-empty';
+      var p1 = document.createElement('p');
+      p1.textContent = 'No birds detected yet.';
+      var p2 = document.createElement('p');
+      p2.className = 'hint';
+      p2.textContent = 'The atlas fills up as BirdNET-Pi identifies new species.';
+      empty.appendChild(p1); empty.appendChild(p2);
+      grid.appendChild(empty);
       return;
     }
     var sort = readLS('av:atlasSort', 'count');
-    if (sort === 'count') sp.sort(function (a, b) { return (+b.n || 0) - (+a.n || 0); });
-    else if (sort === 'recent') sp.sort(function (a, b) {
-      return Date.parse((b.last_seen || '').replace(' ', 'T')) - Date.parse((a.last_seen || '').replace(' ', 'T'));
-    });
-    else sp.sort(function (a, b) {
-      return Date.parse((a.first_seen || '').replace(' ', 'T')) - Date.parse((b.first_seen || '').replace(' ', 'T'));
-    });
-    list.innerHTML = '';
+    if (sort === 'recent') {
+      sp.sort(function (a, b) {
+        return Date.parse((b.last_seen || '').replace(' ', 'T')) - Date.parse((a.last_seen || '').replace(' ', 'T'));
+      });
+    } else if (sort === 'alpha') {
+      sp.sort(function (a, b) { return (a.com || a.sci).localeCompare(b.com || b.sci); });
+    } else {
+      sp.sort(function (a, b) { return (+b.n || 0) - (+a.n || 0); });
+    }
+
     sp.forEach(function (s) {
-      var btn = document.createElement('button');
-      btn.className = 'atlas-card';
-      btn.type = 'button';
-      btn.dataset.sci = s.sci;
+      var card = document.createElement('button');
+      card.className = 'bird-card';
+      card.type = 'button';
+      card.dataset.sci = s.sci;
+
+      var stat = document.createElement('div');
+      stat.className = 'stat';
+      var n = document.createElement('span');
+      n.className = 'n'; n.textContent = String(+s.n || 0);
+      var lbl = document.createElement('span');
+      lbl.className = 'lbl'; lbl.textContent = (+s.n || 0) === 1 ? 'call' : 'calls';
+      stat.appendChild(n); stat.appendChild(lbl);
+
+      var wrap = document.createElement('div');
+      wrap.className = 'img-wrap';
       var img = document.createElement('img');
       img.loading = 'lazy';
       img.decoding = 'async';
       img.alt = s.com || s.sci;
       img.src = imgUrl(s.sci, s.com);
-      var name = document.createElement('span');
-      name.className = 'atlas-name';
-      name.textContent = s.com || s.sci;
-      var count = document.createElement('span');
-      count.className = 'atlas-count';
-      count.textContent = String(+s.n || 0);
-      btn.appendChild(img);
-      btn.appendChild(name);
-      btn.appendChild(count);
-      btn.addEventListener('click', function () { openDetail(s); });
-      list.appendChild(btn);
+      wrap.appendChild(img);
+
+      var h3 = document.createElement('h3');
+      h3.textContent = s.com || s.sci;
+      var sci = document.createElement('p');
+      sci.className = 'sci';
+      var em = document.createElement('em');
+      em.textContent = s.sci;
+      sci.appendChild(em);
+
+      card.appendChild(stat);
+      card.appendChild(wrap);
+      card.appendChild(h3);
+      card.appendChild(sci);
+      card.addEventListener('click', function () { openDetail(s); });
+      grid.appendChild(card);
     });
   }
 
@@ -487,8 +574,6 @@
       modal.setAttribute('role', 'dialog');
       document.body.appendChild(modal);
     }
-    // Single innerHTML for the chrome (no user content), then build the
-    // user-content elements via createElement so labels are safe.
     modal.innerHTML =
       '<div class="modal-backdrop" data-close="1"></div>' +
       '<div class="detail-card">' +
