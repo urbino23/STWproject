@@ -38,7 +38,10 @@ $BY_DATE = dirname(__DIR__, 3) . '/BirdSongs/Extracted/By_Date';
 // By_Date/<date>/<Common_Name>/. So we accept the mp3 filename, swap
 // the extension, and search the same way recording.php does.
 if ($file !== '') {
-    if (!preg_match('/^[A-Za-z0-9_.:-]+\.(mp3|png)$/', $file)) {
+    // BirdNET-Pi keeps apostrophes in some common names (e.g.
+    // Anna's_Hummingbird-...mp3.png), so allow ' in the whitelist; the
+    // regex still blocks "/" and ".." so path traversal isn't reachable.
+    if (!preg_match("/^[A-Za-z0-9_.:'-]+\\.(mp3|png)$/", $file)) {
         http_response_code(400);
         echo 'invalid file name';
         exit;

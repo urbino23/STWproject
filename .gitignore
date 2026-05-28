@@ -25,6 +25,7 @@
 .idea/**/dbnavigator.xml
 
 *.pyc
+__pycache__/
 *.flac
 .vscode
 model/labels.txt

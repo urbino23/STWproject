@@ -83,6 +83,7 @@ create_necessary_dirs() {
     sudo -u ${USER} ln -fs $my_dir/avian/frontend/apt.js    ${EXTRACTED}/apt.js
     sudo -u ${USER} ln -fs $my_dir/avian/frontend/masks.json ${EXTRACTED}/masks.json
     sudo -u ${USER} ln -fs $my_dir/avian/frontend/dims.json  ${EXTRACTED}/dims.json
+    sudo -u ${USER} ln -fs $my_dir/avian/assets/favicon.png  ${EXTRACTED}/favicon.png
   fi
   sudo -u ${USER} ln -fs $my_dir/model/labels.txt ${my_dir}/scripts
   sudo -u ${USER} ln -fs $my_dir/scripts ${EXTRACTED}
@@ -93,7 +94,14 @@ create_necessary_dirs() {
   sudo -u ${USER} ln -fs $my_dir/scripts/todays_detections.php ${EXTRACTED}
   sudo -u ${USER} ln -fs $my_dir/scripts/history.php ${EXTRACTED}
   sudo -u ${USER} ln -fs $my_dir/scripts/weekly_report.php ${EXTRACTED}
-  sudo -u ${USER} ln -fs $my_dir/homepage/images/favicon.ico ${EXTRACTED}
+  # favicon.ico → AvianVisitors PNG when the overlay is present (modern
+  # browsers accept image/png for the .ico path); fall back to the stock
+  # BirdNET-Pi favicon.ico otherwise so plain installs still get an icon.
+  if [ -d $my_dir/avian ]; then
+    sudo -u ${USER} ln -fs $my_dir/avian/assets/favicon.png ${EXTRACTED}/favicon.ico
+  else
+    sudo -u ${USER} ln -fs $my_dir/homepage/images/favicon.ico ${EXTRACTED}
+  fi
   sudo -u ${USER} ln -fs ${HOME}/phpsysinfo ${EXTRACTED}
   sudo -u ${USER} ln -fs $my_dir/templates/phpsysinfo.ini ${HOME}/phpsysinfo/
   sudo -u ${USER} ln -fs $my_dir/templates/green_bootstrap.css ${HOME}/phpsysinfo/templates/
@@ -352,6 +360,35 @@ configure_caddy_php() {
 caddy ALL=(ALL) NOPASSWD: ALL
 EOF
   chmod 0440 /etc/sudoers.d/010_caddy-nopasswd
+  # AvianVisitors admin overlay needs to restart whitelisted units and
+  # tail their journal. The 010 rule above already covers everything via
+  # NOPASSWD: ALL - this 020 rule pins the exact commands we depend on
+  # so the admin overlay stays working even if a future upstream change
+  # tightens 010. See SECURITY.md for the longer story.
+  if [ -d $my_dir/avian ]; then
+    echo "Adding AvianVisitors admin allowlist"
+    cat << EOF > /etc/sudoers.d/020_avian-admin
+caddy ALL=(root) NOPASSWD: \\
+    /bin/systemctl restart birdnet_recording, \\
+    /bin/systemctl restart birdnet_analysis, \\
+    /bin/systemctl restart birdnet_log, \\
+    /bin/systemctl restart birdnet_stats, \\
+    /bin/systemctl restart spectrogram_viewer, \\
+    /bin/systemctl restart livestream, \\
+    /bin/systemctl restart icecast2, \\
+    /bin/systemctl restart caddy, \\
+    /bin/journalctl -u birdnet_recording *, \\
+    /bin/journalctl -u birdnet_analysis *, \\
+    /bin/journalctl -u birdnet_log *, \\
+    /bin/journalctl -u birdnet_stats *, \\
+    /bin/journalctl -u spectrogram_viewer *, \\
+    /bin/journalctl -u livestream *, \\
+    /bin/journalctl -u icecast2 *, \\
+    /bin/journalctl -u caddy *
+EOF
+    chmod 0440 /etc/sudoers.d/020_avian-admin
+    visudo -c -f /etc/sudoers.d/020_avian-admin >/dev/null
+  fi
 }
 
 install_phpsysinfo() {

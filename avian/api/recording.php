@@ -42,7 +42,10 @@ $BY_DATE = dirname(__DIR__, 3) . '/BirdSongs/Extracted/By_Date';
 // directory under By_Date/. Whitelisted character set keeps this
 // safe against path-traversal payloads.
 if ($file !== '') {
-    if (!preg_match('/^[A-Za-z0-9_.:-]+\.mp3$/', $file)) {
+    // BirdNET-Pi keeps apostrophes in some common names (e.g.
+    // Anna's_Hummingbird-...mp3), so allow ' in the whitelist; the
+    // regex still blocks "/" and ".." so path traversal isn't reachable.
+    if (!preg_match("/^[A-Za-z0-9_.:'-]+\\.mp3$/", $file)) {
         http_response_code(400);
         echo 'invalid file name';
         exit;

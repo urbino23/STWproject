@@ -76,6 +76,8 @@ See [`avian/forwarding/`](avian/forwarding/) for three independent recipes:
 - **Home Assistant REST sensor** that exposes the latest detection.
 - **MQTT bridge** that publishes every new detection.
 
+If anyone other than you can reach the Pi at the network layer — a shared apartment LAN, dorm wifi, an open hotspot, a forwarded port — read [`SECURITY.md`](SECURITY.md) first. The default install assumes a trusted home network; the admin overlay's settings/system/logs panels need a Caddy basic_auth gate before they're safe outside that.
+
 ---
 
 ## Repo layout

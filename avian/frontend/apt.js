@@ -1209,19 +1209,12 @@
   document.addEventListener('click', function (e) { if (!dd.contains(e.target) && e.target !== menuBtn) closeDd(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDd(); });
 
-  // Session is now an HTTP-only cookie set by /api/auth/login — we no
-  // longer cache the Basic-auth password in sessionStorage where any
-  // page-scoped script could read it. authHdr is kept around as a
-  // transient value for the legacy-UI warm-up POST only, and is never
-  // persisted.
-  // Drop any prior sessionStorage we left behind (security cleanup —
-  // previous builds stored Basic auth across reloads).
-  try { sessionStorage.removeItem('apt-birds-auth'); } catch (e) {}
-  var authHdr = null;
-
-  // Probe the cookie session: hit /api/menu without any header. If the
-  // worker accepts the cookie we skip the lock screen; if it 401s we
-  // show the lock as usual.
+  // Probe menu.php with no Authorization header. On a LAN deploy
+  // (AV_REQUIRE_AUTH=0) it returns 200 immediately so the drawer
+  // renders directly. On a forwarded deploy with Caddy basic_auth in
+  // front, Caddy will already have validated credentials before this
+  // request reaches PHP - so a 200 here means we're authed, a 401
+  // means Caddy rejected and we need the lock-screen flow.
   function tryAutoUnlock() {
     fetch('./avian/api/menu.php', { credentials: 'same-origin' }).then(function (r) {
       if (r.status === 200) {
@@ -1233,23 +1226,22 @@
 
   document.getElementById('unlockForm').addEventListener('submit', function (e) {
     e.preventDefault();
-    var u = 'monalisa';
+    // BirdNET-Pi's upstream Caddyfile basicauth user is `birdnet`.
+    // If your install changed it (custom Caddyfile), set window.AV_AUTH_USER
+    // before this script loads - e.g. an inline <script> in index.html.
+    var u = (window.AV_AUTH_USER || 'birdnet');
     var p = document.getElementById('lockPass').value;
     var hdr = 'Basic ' + btoa(u + ':' + p);
-    // POST the credentials to /api/auth/login — the worker validates
-    // them, sets an HTTP-only signed session cookie, and replies 200.
-    // We never store the password anywhere on the client.
-    fetch('/api/auth/login', {
+    // POST to menu.php with the header so the browser caches the basic
+    // creds for every subsequent request. If Caddy basic_auth accepts
+    // them we get a 200 and the drawer renders; 401 means wrong password.
+    fetch('./avian/api/menu.php', {
       method: 'POST',
       headers: { 'Authorization': hdr },
       credentials: 'same-origin',
     }).then(function (r) {
       if (r.status === 200) {
-        // Cookie is set — fetch the drawer JSON the same way every
-        // protected endpoint will be called from now on (cookie-based).
-        return fetch('./avian/api/menu.php', { credentials: 'same-origin' })
-          .then(function (m) { return m.json(); })
-          .then(function (j) { renderMenu(j.items || []); });
+        return r.json().then(function (j) { renderMenu(j.items || []); });
       } else if (r.status === 401) {
         lockHint.textContent = 'wrong password.';
         lockHint.classList.add('lock-err');
@@ -1458,7 +1450,7 @@
   }
 
   function loadSettings() {
-    fetch('/api/config', { credentials: 'same-origin', cache: 'no-store' })
+    fetch('./avian/api/config.php', { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (cfg) {
         var v = cfg.values || {};
@@ -1560,7 +1552,7 @@
     if (Object.keys(pending).length === 0) return;
     var body = JSON.stringify(pending);
     setSaveState('saving…');
-    fetch('/api/config', {
+    fetch('./avian/api/config.php', {
       method: 'POST', body: body,
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
@@ -2054,7 +2046,7 @@
 
   function renderAdminSettings() {
     adminBody.innerHTML = '<p style="font:11px ui-monospace,monospace;color:var(--ink-soft);text-align:center">loading settings…</p>';
-    fetch('/api/config', { credentials: 'same-origin', cache: 'no-store' })
+    fetch('./avian/api/config.php', { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (cfg) {
         var v = cfg.values || {};
@@ -2086,7 +2078,7 @@
   function renderAdminSystem() {
     adminBody.innerHTML = '<p style="font:11px ui-monospace,monospace;color:var(--ink-soft);text-align:center">loading…</p>';
     function tick() {
-      adminApi('/api/status?action=diag')
+      adminApi('./avian/api/birdnet-status.php?action=diag')
         .then(function (r) { return r.text().then(function (raw) { return { status: r.status, raw: raw }; }); })
         .then(function (res) {
           var j = null;
@@ -2179,7 +2171,7 @@
         var unit = b.dataset.unit;
         if (!confirm('Restart ' + unit + '?')) return;
         b.disabled = true; var old = b.textContent; b.textContent = '…';
-        fetch('/api/status?action=restart&unit=' + encodeURIComponent(unit), {
+        fetch('./avian/api/birdnet-status.php?action=restart&unit=' + encodeURIComponent(unit), {
           method: 'POST', credentials: 'same-origin',
         })
           .then(function (r) { return r.json(); })
@@ -2197,7 +2189,11 @@
     adminBody.innerHTML =
       '<div class="admin-logs-toolbar">'
       + '  <label>unit</label><select id="adminLogsUnit">'
-      + ['birdnet_recording','birdnet_analysis','birdnet_log','birdnet_stats','spectrogram_viewer','livestream','icecast2','caddy','php8.2-fpm']
+      // php-fpm unit name differs per Debian version (8.2 on Bookworm,
+      // 8.4 on Trixie). List all three so the dropdown has the right one
+      // regardless of host - birdnet-status.php's ALLOWED_UNITS already
+      // skips ones systemd doesn't know about.
+      + ['birdnet_recording','birdnet_analysis','birdnet_log','birdnet_stats','spectrogram_viewer','livestream','icecast2','caddy','php8.4-fpm','php8.3-fpm','php8.2-fpm']
           .map(function (u) { return '<option value="' + u + '">' + u + '</option>'; }).join('')
       + '  </select>'
       + '  <label>lines</label><input id="adminLogsLines" type="number" value="120" min="20" max="500" step="20">'
@@ -2212,7 +2208,7 @@
       autoScroll = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 20;
     });
     function tick() {
-      adminApi('/api/status?action=logs&unit=' + encodeURIComponent(unit) + '&lines=' + lines)
+      adminApi('./avian/api/birdnet-status.php?action=logs&unit=' + encodeURIComponent(unit) + '&lines=' + lines)
         .then(function (r) { return r.text().then(function (raw) { return { status: r.status, raw: raw }; }); })
         .then(function (res) {
           var j = null;
@@ -2248,7 +2244,7 @@
         + '</div>';
     });
     html += '</div>';
-    html += '<h2 class="admin-section-head">pi-side install / heal</h2>';
+    html += '<h2 class="admin-section-head">heal / update</h2>';
     html += '<div class="admin-actions-grid">';
     function deployCard(title, desc, lines) {
       return '<div class="admin-action deploy">'
@@ -2258,20 +2254,17 @@
         + '<button class="copy" type="button">copy</button>'
         + '</div>';
     }
-    html += deployCard('install birdnet-status.php',
-      'adds the /system + /logs json backend on the pi (only needed once).',
+    html += deployCard('pull latest from github',
+      'fetches the newest AvianVisitors + BirdNET-Pi changes; the symlinks already in /BirdSongs/Extracted/ pick up new code on the next request.',
       [
-        'curl -fsSL https://bird.onethreenine.net/install/birdnet-status.php -o /tmp/birdnet-status.php',
-        'sudo install -o monalisa -g monalisa -m 0644 /tmp/birdnet-status.php /home/monalisa/BirdSongs/Extracted/birdnet-status.php',
+        'cd ~/BirdNET-Pi && git pull',
+        '# substitute the right php-fpm unit if your debian ships a different version:',
+        'sudo systemctl reload caddy "$(systemctl list-unit-files \'php*-fpm.service\' --no-legend | awk \'{print $1; exit}\')"',
       ]);
-    html += deployCard('full heal (services + reinstall)',
-      're-pulls all php endpoints and restarts every birdnet-pi service.',
+    html += deployCard('rerun install_services.sh',
+      'refreshes every symlink + service file. safe to run anytime; only takes ~10 seconds.',
       [
-        'for f in birdnet-api.php cutout.php recording.php spectrogram.php config.php birdnet-status.php; do',
-        '  curl -fsSL "https://bird.onethreenine.net/install/$f" -o "/tmp/$f"',
-        '  sudo install -o monalisa -g monalisa -m 0644 "/tmp/$f" "/home/monalisa/BirdSongs/Extracted/$f"',
-        'done',
-        'sudo systemctl restart birdnet_recording birdnet_analysis birdnet_log birdnet_stats spectrogram_viewer livestream',
+        'cd ~/BirdNET-Pi && ./scripts/install_services.sh',
       ]);
     html += '</div>';
     adminBody.innerHTML = html;
@@ -2282,7 +2275,7 @@
         if (!confirm('restart ' + unit + '?')) return;
         b.disabled = true; var old = b.textContent; b.textContent = '…';
         var out = adminBody.querySelector('.out[data-out="' + unit.replace(/[^a-z0-9_.-]/gi,'_') + '"]');
-        fetch('/api/status?action=restart&unit=' + encodeURIComponent(unit), {
+        fetch('./avian/api/birdnet-status.php?action=restart&unit=' + encodeURIComponent(unit), {
           method: 'POST', credentials: 'same-origin',
         })
           .then(function (r) { return r.json(); })

@@ -23,15 +23,16 @@ if (getenv('AV_REQUIRE_AUTH') === '1' && empty($_SERVER['HTTP_AUTHORIZATION'])) 
     exit;
 }
 
-// All hrefs are the canonical paths BirdNET-Pi's views.php recognises
-// (lifted from homepage/views.php). AvianVisitors took over `/`, so
-// the stock home is at /index.php.
+// All four items are in-app overlays. `native: true` tells the FE to
+// route via `#admin=<section>` rather than opening a new window. We
+// deliberately don't link out to BirdNET-Pi's stock pages - those stay
+// reachable at /index.php, and the github link lives in the drawer
+// footer next to "built by teddy".
 echo json_encode([
     'items' => [
-        ['label' => 'birdnet-pi', 'href' => '/index.php',                            'native' => false],
-        ['label' => 'detections', 'href' => '/views.php?view=Todays+Detections',     'native' => false],
-        ['label' => 'log',        'href' => '/views.php?view=View+Log',              'native' => false],
-        ['label' => 'system',     'href' => '/views.php?view=Services',              'native' => false],
-        ['label' => 'github',     'href' => 'https://github.com/Twarner491/AvianVisitors', 'native' => false],
+        ['label' => 'settings', 'href' => '/#admin=settings', 'native' => true],
+        ['label' => 'system',   'href' => '/#admin=system',   'native' => true],
+        ['label' => 'logs',     'href' => '/#admin=logs',     'native' => true],
+        ['label' => 'tools',    'href' => '/#admin=tools',    'native' => true],
     ],
 ]);
