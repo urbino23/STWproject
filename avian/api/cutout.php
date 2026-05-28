@@ -54,7 +54,7 @@ if (is_file($cutout) && filesize($cutout) > 1024) {
 }
 
 // 3. Dynamic cache from a previous Wikipedia + rembg run.
-$cacheDir = getenv('HOME') . '/BirdSongs/Extracted/cutouts';
+$cacheDir = dirname(__DIR__, 3) . '/BirdSongs/Extracted/cutouts';
 $cachePath = "$cacheDir/$slug.png";
 if (is_file($cachePath) && filesize($cachePath) > 1024) {
     serve_png($cachePath);

@@ -18,18 +18,14 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: public, max-age=30');
 
-// SCRIPT_FILENAME on the Pi resolves through the symlink to
-// $HOME/BirdNET-Pi/avian/api/birdnet-api.php - walk three dirs up to
-// reach the install root, then point at scripts/birds.db. Lets a Pi
-// installed under any username (the BirdNET-Pi installer uses $USER,
-// not a fixed name) work without editing this file.
-$DB_PATH = dirname(__DIR__, 3) . '/scripts/birds.db';
-// Fallback if the symlink layout ever changes - keeps the most common
-// install path working even if SCRIPT_FILENAME oddities trip __DIR__.
-if (!file_exists($DB_PATH)) {
-    $alt = getenv('HOME') . '/BirdNET-Pi/scripts/birds.db';
-    if (file_exists($alt)) $DB_PATH = $alt;
-}
+// PHP resolves __DIR__ through symlinks to the realpath. This script
+// lives at $HOME/BirdNET-Pi/avian/api/birdnet-api.php (served via the
+// ${EXTRACTED}/avian symlink). dirname(..., 2) walks to the BirdNET-Pi
+// install root. Works under any username because we never bake the
+// home directory in. getenv('HOME') would resolve to /var/lib/caddy
+// under PHP-FPM (BirdNET-Pi runs it as the caddy user), so it can't
+// be relied on.
+$DB_PATH = dirname(__DIR__, 2) . '/scripts/birds.db';
 
 if (!file_exists($DB_PATH)) {
     http_response_code(503);

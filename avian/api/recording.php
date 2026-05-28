@@ -32,7 +32,7 @@ if ($sci !== '' && !preg_match('/^[A-Za-z]{2,40}(?:[ ][a-z]{2,40}){1,3}$/', $sci
     exit;
 }
 
-$BY_DATE = getenv('HOME') . '/BirdSongs/Extracted/By_Date';
+$BY_DATE = dirname(__DIR__, 3) . '/BirdSongs/Extracted/By_Date';
 
 // ---- Direct-by-file lookup ----
 // Used by the atlas detail modal to play any past recording.
@@ -96,7 +96,7 @@ if ($file !== '') {
 // ---- Resolve scientific name → common name (with underscores) ----
 function resolve_common(string $sci): ?string {
     // Try birds.json first (preferred - has clean sci/com pairs).
-    foreach ([getenv('HOME') . '/BirdNET-Pi/scripts/birds.json'] as $f) {
+    foreach ([dirname(__DIR__, 3) . '/BirdNET-Pi/scripts/birds.json'] as $f) {
         if (is_readable($f)) {
             $list = json_decode((string)file_get_contents($f), true);
             if (is_array($list)) {
@@ -112,7 +112,7 @@ function resolve_common(string $sci): ?string {
         }
     }
     // Fallback: labels.txt has "<sci>_<com>" or "<sci>, <com>" per line.
-    $labels = getenv('HOME') . '/BirdNET-Pi/model/labels.txt';
+    $labels = dirname(__DIR__, 3) . '/BirdNET-Pi/model/labels.txt';
     if (is_readable($labels)) {
         foreach (file($labels, FILE_IGNORE_NEW_LINES) as $line) {
             if (strpos($line, '_') !== false) {
