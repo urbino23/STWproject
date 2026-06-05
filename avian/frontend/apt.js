@@ -681,163 +681,116 @@
     (ts.by_hour || []).forEach(function (r) { byHour[+r.hour] = +r.detections; });
     STATS.byHour = byHour;
     speciesTotals = {};
-    (ll.species || []).forEach(function (s) { speciesTotals[s.sci] = +s.total; });
+    (ll.species || []).forEach(function (s) { speciesTotals[s.sci] = +s.n; });
   }
 
-  // ---- Chart palette ----
-  // Monochromatic ink, matching the title text (--ink). Bars positioned
-  // toward the "recent" end of the gradient render in deeper ink; older
-  // bars fade to a warm light grey. Same hue family throughout.
-  function barColor(t) {
-    // t = 0 (outer / newest) -> 1 (inner / oldest).
-    // Monochromatic ink palette: same warm hue as the title text
-    // (--ink: #1a1612 ≈ HSL 25, 14%, 9%). Newest hours render in deep
-    // ink so the outer perimeter reads bold; older hours fade to a
-    // warm light grey, the chart looks like a hand-pulled engraving.
-    var hue = 25;                    // warm-grey hue, matches --ink family
-    var sat = 12 - t * 8;             // 12% -> 4%
-    var light = 14 + t * 50;          // 14% (near-black) -> 64% (light grey)
-    return 'hsl(' + hue + ', ' + sat.toFixed(0) + '%, ' + light.toFixed(0) + '%)';
-  }
-
-  // Editorial detection timeline. One column per species; the black
-  // square's height up the column encodes detection count (y axis),
-  // columns run left->right oldest->newest detection (x axis). A
-  // rotated species label sits just above each square. Y-axis count
-  // ticks on the left, X-axis time labels on the bottom. Always fits
-  // the viewport - column widths flex, square size steps down as the
-  // species count climbs.
-  function drawHistograms() {
+  // Editorial detection timeline. One evenly-spaced column per species,
+  // ordered oldest -> newest by last detection (x = time). Each species
+  // owns a cell, so the black squares never overlap and a square fills
+  // its column width - neighbours touch at the shared gridline. The
+  // square's height up the column encodes detection count; a small
+  // rotated label (common + scientific name) sits at the column's
+  // bottom, and each column carries its own timestamp on the x-axis.
+  function drawHistograms(animate) {
     var tl = document.getElementById('statsTimeline');
     if (!tl) return;
     var all = ((DATA.recent && DATA.recent.species) || []).slice();
-
-    // X-axis = the FULL selected time window, so quiet stretches show
-    // as actual empty space. windowStart/now span everything; species
-    // squares get placed within by their last_seen timestamp.
-    var now = Date.now();
-    var isAllWindow = currentHours >= 1000000;
-    var windowStart;
-    if (isAllWindow) {
-      // ALL = since the earliest known first_seen. Fall back to 'now'
-      // if the firstseen list hasn't loaded yet, which collapses to an
-      // empty span - the empty-state branch below catches that.
-      var oldest = now;
-      var first = (DATA.firstseen && DATA.firstseen.species) || [];
-      first.forEach(function (s) {
-        var t = Date.parse((s.first_seen || '').replace(' ', 'T'));
-        if (!isNaN(t) && t < oldest) oldest = t;
-      });
-      ((DATA.lifelist && DATA.lifelist.species) || []).forEach(function (s) {
-        var t = Date.parse((s.first_seen || '').replace(' ', 'T'));
-        if (!isNaN(t) && t < oldest) oldest = t;
-      });
-      windowStart = oldest;
-    } else {
-      windowStart = now - currentHours * 3600000;
-    }
-    var windowSpan = Math.max(1, now - windowStart);
-
     if (!all.length) {
       tl.innerHTML = '<div class="stats-tl-empty">no detections in this window</div>';
       return;
     }
 
-    // Cap species count so labels don't pile up. Same rule as before -
-    // ~28 px per visible mark - but applied to the count of marks, not
-    // the column layout (which is now time-positioned).
-    var plotW = Math.max(140, (tl.clientWidth || window.innerWidth || 800) - 40);
-    var cap = Math.max(4, Math.floor(plotW / 28));
+    // Discrete columns. On a phone the columns are fixed-width and wider
+    // (legible squares + labels for touch) and the plot grows past the
+    // viewport to scroll horizontally - so we show ALL species rather than
+    // trimming. On desktop, cap to whatever fits the available width.
+    var isMobile = (window.innerWidth || 800) <= 700;
+    var containerW = Math.max(140, (tl.clientWidth || window.innerWidth || 800) - 34);
+    var MIN_COL = isMobile ? 52 : 22;
+    var cap = isMobile ? all.length : Math.max(3, Math.floor(containerW / MIN_COL));
     var trimmed = all.length > cap;
     var species = all.slice();
     if (trimmed) {
       species.sort(function (a, b) { return (+b.n || 0) - (+a.n || 0); });
       species = species.slice(0, cap);
     }
+    // X-axis is time: order the chosen columns oldest -> newest.
+    function parseTs(s) { return s ? Date.parse(s.replace(' ', 'T')) : NaN; }
+    species.sort(function (a, b) {
+      var ta = parseTs(a.last_seen), tb = parseTs(b.last_seen);
+      if (isNaN(ta)) return 1;
+      if (isNaN(tb)) return -1;
+      return ta - tb;
+    });
 
-    var maxN = species.reduce(function (m, s) { return Math.max(m, +s.n || 0); }, 1);
     var C = species.length;
-    var tier = C <= 5 ? 24 : C <= 12 ? 18 : C <= 24 ? 13 : 9;
-    var sq = Math.max(7, Math.min(tier, Math.round((plotW / C) * 0.62)));
-    var LABEL_GAP = 7;
-    var SPAN = 0.52; // bottom slice of plot for squares; rest is label headroom.
+    var maxN = species.reduce(function (m, s) { return Math.max(m, +s.n || 0); }, 1);
+    // Mobile: fixed wide columns -> plot can exceed the viewport and scroll.
+    // Desktop: columns split the available width evenly.
+    var colW = isMobile ? MIN_COL : (containerW / C);
+    var plotW = isMobile ? Math.max(containerW, C * colW) : containerW;
+    // Square fills its column so adjacent squares touch at the shared
+    // gridline; capped so a few species don't render as giant blocks.
+    var sq = Math.max(6, Math.min(colW, isMobile ? 60 : 48));
+    var LABEL_GAP = 6;       // px between a square's top and its label
+    var SPAN = 0.55;         // squares occupy the bottom this fraction of
+                             // the plot by count (y = quantity); the
+                             // rotated label floats just above each square.
 
-    // Y-axis: 0..maxN with maxN pinned on the top tick. Same as before.
+    // Y-axis quantity ticks: 0..maxN, with maxN pinned on the top tick.
     var ticks = [];
     if (maxN <= 8) {
       for (var v = 0; v <= maxN; v++) ticks.push(v);
     } else {
       var divs = 4;
-      for (var i = 0; i <= divs; i++) ticks.push(Math.round(maxN * i / divs));
+      for (var di = 0; di <= divs; di++) ticks.push(Math.round(maxN * di / divs));
       ticks[ticks.length - 1] = maxN;
     }
     var yaxis = ticks.map(function (v) {
-      var pct = (v / maxN) * SPAN * 100;
-      return '<span class="stats-tl-ytick" style="bottom:' + pct.toFixed(1) + '%">' + v + '</span>';
+      return '<span class="stats-tl-ytick" style="bottom:' + ((v / maxN) * SPAN * 100).toFixed(1) + '%">' + v + '</span>';
     }).join('');
 
-    // Marks - each species placed by its last_seen time on the x-axis.
-    function parseTs(s) {
-      if (!s) return NaN;
-      return Date.parse(s.replace(' ', 'T'));
-    }
-    var cols = species.map(function (s) {
-      var ts = parseTs(s.last_seen);
-      var leftPct;
-      if (isNaN(ts)) {
-        leftPct = 50;
-      } else {
-        var clamped = Math.max(windowStart, Math.min(now, ts));
-        leftPct = ((clamped - windowStart) / windowSpan) * 100;
-      }
-      var n = +s.n || 0;
-      var bottomPct = (n / maxN) * SPAN * 100;
-      return ''
-        + '<div class="stats-tl-col" data-sci="' + s.sci + '" style="left:' + leftPct.toFixed(2) + '%">'
-        +   '<div class="stats-tl-square" style="bottom:' + bottomPct.toFixed(1) + '%;width:' + sq + 'px;height:' + sq + 'px"></div>'
-        +   '<div class="stats-tl-label" style="bottom:calc(' + bottomPct.toFixed(1) + '% + ' + (sq + LABEL_GAP) + 'px)">'
-        +     '<span class="com">' + (s.com || s.sci) + '</span>'
-        +     '<span class="sci">' + s.sci + '</span>'
-        +   '</div>'
-        + '</div>';
-    }).join('');
-
-    // X-axis ticks + gridlines at regular boundaries that span the
-    // window - every 15 min for 1H, every 4-6 h for 24H, every day for
-    // 7D, etc. Both are children of the plot so left:% aligns.
-    function pickStepMs(span) {
-      var h = span / 3600000;
-      if (h <= 1.2) return 15 * 60000;
-      if (h <= 6) return 60 * 60000;
-      if (h <= 14) return 2 * 3600000;
-      if (h <= 36) return 6 * 3600000;
-      if (h <= 9 * 24) return 24 * 3600000;
-      if (h <= 75 * 24) return 7 * 24 * 3600000;
-      return 30 * 24 * 3600000;
-    }
-    function fmtTick(ms, span) {
+    // One timestamp under each column - format follows the window length.
+    function fmtTs(ms) {
+      if (isNaN(ms)) return '';
       var d = new Date(ms);
       var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
-      if (span <= 36 * 3600000) return p2(d.getHours()) + ':' + p2(d.getMinutes());
-      if (span <= 75 * 86400000) return (d.getMonth() + 1) + '/' + d.getDate();
+      if (currentHours <= 36) return p2(d.getHours()) + ':' + p2(d.getMinutes());
+      if (currentHours <= 75 * 24) return (d.getMonth() + 1) + '/' + d.getDate();
       return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }
-    var stepMs = pickStepMs(windowSpan);
-    var firstTick = Math.ceil(windowStart / stepMs) * stepMs;
-    var xaxis = '', gridlines = '';
-    for (var t = firstTick; t <= now; t += stepMs) {
-      var pct = ((t - windowStart) / windowSpan) * 100;
-      xaxis += '<span class="stats-tl-xtick" style="left:' + pct.toFixed(2) + '%">' + fmtTick(t, windowSpan) + '</span>';
-      gridlines += '<i class="stats-tl-gridline" style="left:' + pct.toFixed(2) + '%"></i>';
+
+    // Faint gridlines at every column boundary. Start at gi=1: the gi=0
+    // line would sit on top of the y-axis rule (double line), so skip it.
+    var gridlines = '';
+    for (var gi = 1; gi <= C; gi++) {
+      gridlines += '<i class="stats-tl-gridline" style="left:' + (gi / C * 100).toFixed(3) + '%"></i>';
     }
+
+    var cols = '', xaxis = '';
+    species.forEach(function (s, i) {
+      var centerPct = (i + 0.5) / C * 100;
+      var n = +s.n || 0;
+      var bottomPct = (n / maxN) * SPAN * 100;   // square height = quantity
+      cols += ''
+        + '<div class="stats-tl-col" data-sci="' + s.sci + '" style="left:' + centerPct.toFixed(3) + '%;width:' + colW.toFixed(2) + 'px">'
+        +   '<div class="stats-tl-square" style="bottom:' + bottomPct.toFixed(1) + '%;width:' + sq.toFixed(1) + 'px;height:' + sq.toFixed(1) + 'px"></div>'
+        +   '<div class="stats-tl-label" style="bottom:calc(' + bottomPct.toFixed(1) + '% + ' + (sq + LABEL_GAP) + 'px)"><span class="com">' + (s.com || s.sci) + '</span><span class="sci">' + s.sci + '</span></div>'
+        + '</div>';
+      var lab = fmtTs(parseTs(s.last_seen));
+      if (lab) xaxis += '<span class="stats-tl-xtick" style="left:' + centerPct.toFixed(3) + '%">' + lab + '</span>';
+    });
 
     var note = trimmed
       ? '<div class="stats-tl-cap">' + C + ' most-heard of ' + all.length + '</div>'
       : '';
     tl.innerHTML =
       '<div class="stats-tl-yaxis">' + yaxis + '</div>'
-      + '<div class="stats-tl-plot">' + gridlines + cols + xaxis + '</div>'
+      + '<div class="stats-tl-plot"' + (isMobile ? ' style="width:' + Math.round(plotW) + 'px"' : '') + '>'
+      +   gridlines + cols + xaxis
+      + '</div>'
       + note;
+    if (animate) playStatsEntrance();
   }
 
   // Cross-highlight between the timeline squares and the right-side
@@ -2794,8 +2747,9 @@
 
   // Any element with data-sci is a "jump to that bird's atlas card"
   // affordance: atlas cards themselves, stats list rows (top species /
-  // first detections), and any future surface that wants to point at a
-  // bird. Action chips inside cards stop propagation themselves.
+  // first detections), stats timeline squares, and any future surface
+  // that wants to point at a bird. Action chips inside cards stop
+  // propagation themselves.
   function jumpToSci(sci) {
     if (!sci) return;
     if (location.hash !== '#sci=' + encodeURIComponent(sci)) {
@@ -2814,13 +2768,15 @@
     }
     var row = ev.target.closest('li[data-sci]');
     if (row) return jumpToSci(row.dataset.sci);
+    var tlCol = ev.target.closest('.stats-tl-col[data-sci]');
+    if (tlCol) return jumpToSci(tlCol.dataset.sci);
   });
 
   // After the atlas re-renders (window change, fresh fetch), re-apply
   // any active hash so the highlight survives a rebuild.
   var _origRenderAtlas = renderAtlas;
-  renderAtlas = function () {
-    _origRenderAtlas();
+  renderAtlas = function (animate) {
+    _origRenderAtlas(animate);
     var s = readHash();
     if (s) highlightAtlas(s);
   };

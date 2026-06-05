@@ -574,40 +574,53 @@
        on both short landscape phones and tall portrait ones. */
     .stats-timeline { height: clamp(260px, 44vh, 420px); }
   }
+  /* Phones: the timeline keeps its editorial form but uses fixed wider
+     columns (set in drawHistograms) and scrolls horizontally for the rest,
+     with larger labels/ticks so it's legible + tappable. */
+  @media (max-width: 700px) {
+    .stats-timeline { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .stats-tl-label { font-size: 11px; }
+    .stats-tl-label .sci { font-size: 9px; }
+    .stats-tl-xtick { font-size: 8px; }
+  }
+  /* Desktop two-column: size the grid to the side panel's content height
+     (the timeline stretches to match it) and centre it vertically, so the
+     chart sits beside the text at the same height instead of stretching to
+     the full viewport. */
+  @media (min-width: 901px) {
+    .stats-grid { flex: 0 1 auto; margin: auto; }
+  }
 
-  /* Editorial detection timeline. One column per species. Black
-     square positioned vertically by count (y = quantity), columns
-     ordered by detection time (x = time). Rotated two-line label
-     sits just above its square. Y-axis count ticks on the left,
-     X-axis time labels on the bottom. Fits the viewport - never scrolls. */
+  /* Editorial detection timeline. One evenly-spaced column per species,
+     ordered by last-detection time (x = time). Black square fills its
+     column so neighbours touch at the gridline; its height up the column
+     encodes count. Small rotated label + per-column timestamp at the
+     bottom. Fits the viewport - never scrolls. */
   .stats-timeline {
     position: relative;
     flex: 1 1 auto; min-height: 0;
-    padding: 0 0 30px 40px;   /* bottom = x-axis, left = y-axis */
+    padding: 0 0 28px 32px;   /* left = y-axis (quantity), bottom = timestamps */
   }
   .stats-tl-yaxis {
-    position: absolute; left: 0; top: 0; bottom: 30px; width: 36px;
-    border-right: 1px solid rgba(26,22,18,0.22);
+    position: absolute; left: 0; top: 0; bottom: 28px; width: 28px;
+    border-right: 1px solid var(--hairline);
   }
   .stats-tl-ytick {
     position: absolute; right: 5px;
-    font: 9px/1 "SF Mono", Menlo, monospace; color: var(--ink-soft);
+    font: 8px/1 "SF Mono", Menlo, monospace; color: var(--ink-soft);
     transform: translateY(50%);
   }
   .stats-tl-ytick::after {
     content: ''; position: absolute; right: -5px; top: 50%;
-    width: 4px; height: 1px; background: rgba(26,22,18,0.3);
+    width: 4px; height: 1px; background: var(--hairline);
   }
   .stats-tl-plot {
     position: relative; height: 100%;
   }
-  /* Each species is absolutely positioned along the time axis by its
-     last_seen; columns aren't equal-width anymore, so gaps in the
-     timeline show as actual empty space. The width is a label/square
-     gutter, not a layout slot. */
+  /* Evenly-spaced cell, one per species. JS sets left (column centre)
+     and width (the column slot); the square and label centre within it. */
   .stats-tl-col {
     position: absolute; top: 0; bottom: 0;
-    width: 28px;
     transform: translateX(-50%);
     cursor: pointer;
   }
@@ -616,13 +629,20 @@
   .stats-tl-gridline {
     position: absolute; top: 0; bottom: 0;
     width: 1px;
-    background: rgba(26,22,18,0.10);
+    background: var(--hairline);
     pointer-events: none;
   }
   .stats-tl-square {
     position: absolute; left: 50%;
     transform: translateX(-50%);
     background: var(--ink);
+    /* Paper-coloured side borders. box-sizing: border-box keeps the box
+       column-filling, so the fill just insets 1px each side. Where two
+       squares touch, the abutting borders read as a crisp white line
+       directly between them; on the cluster's outer edges they vanish
+       into the matching paper background. */
+    border-left: 1px solid var(--paper);
+    border-right: 1px solid var(--paper);
     transition: background 140ms ease, transform 140ms ease;
   }
   .stats-tl-col { cursor: pointer; }
@@ -648,9 +668,12 @@
   .stats-tl-label {
     position: absolute; left: 50%;
     transform-origin: 0% 100%;
+    /* translateY(50%) becomes a horizontal shift after the -90deg turn
+       that re-centres the rotated label on the column (= on its square),
+       so the name reads up the middle of each block. */
     transform: rotate(-90deg) translateY(50%);
     white-space: nowrap;
-    font: 11px/1.2 ui-serif, "Iowan Old Style", Georgia, serif;
+    font: 10px/1.15 ui-serif, "Iowan Old Style", Georgia, serif;
     color: var(--ink);
     transition: transform 130ms ease;
   }
@@ -660,16 +683,16 @@
   }
   .stats-tl-label .sci {
     display: block;
-    font-style: italic; color: var(--ink-soft); font-size: 9.5px;
+    font-style: italic; color: var(--ink-soft); font-size: 8.5px;
     transition: color 130ms ease;
   }
   /* Ticks live inside .stats-tl-plot so their left:% aligns with the
      gridlines (both share the plot's content box). bottom is negative
      to push the label into the x-axis gutter below the plot. */
   .stats-tl-xtick {
-    position: absolute; bottom: -22px;
+    position: absolute; bottom: -19px;
     transform: translateX(-50%);
-    font: 8.5px/1 "SF Mono", Menlo, monospace; color: var(--ink-soft);
+    font: 7px/1 "SF Mono", Menlo, monospace; color: var(--ink-soft);
     white-space: nowrap;
   }
   .stats-tl-empty {
