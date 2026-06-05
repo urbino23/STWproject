@@ -71,6 +71,41 @@
   // can be invalidated by bumping the prefix.
   function readLS(k, fallback) { try { return localStorage.getItem(k) || fallback; } catch (e) { return fallback; } }
   function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  // ---- Single-audio coordinator ----
+  // Only one source plays at a time across the whole app: atlas-card
+  // playback, modal recording playback, and the live stream each call
+  // audioClaim(theirStopFn) the moment they start, which stops whatever
+  // else was playing, and audioRelease(theirStopFn) when they stop on
+  // their own. Keeps "start a new one -> the old one pauses" true even
+  // across those three independent players.
+  var __audioActiveStop = null;
+  function audioClaim(stopSelf) {
+    if (__audioActiveStop && __audioActiveStop !== stopSelf) {
+      var prev = __audioActiveStop;
+      __audioActiveStop = null;
+      try { prev(); } catch (e) {}
+    }
+    __audioActiveStop = stopSelf;
+  }
+  function audioRelease(stopSelf) {
+    if (__audioActiveStop === stopSelf) __audioActiveStop = null;
+  }
+
+  // ---- Theme (light / charcoal dark) ----
+  // A per-device preference (localStorage), applied as data-theme on
+  // <html>. An inline script in index.html sets it before first paint to
+  // avoid a flash; this keeps it in sync and powers the Settings switcher.
+  function applyTheme(name) {
+    var t = name === 'dark' ? 'dark' : 'light';
+    if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+    writeLS('bird:theme', t);
+  }
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+  applyTheme(readLS('bird:theme', 'light'));
   var winBtns = [].slice.call(winPick.querySelectorAll('button'));
   var currentHours = +readLS('bird:window', '24') || 24;
   winBtns.forEach(function (b) {
@@ -1032,6 +1067,7 @@
       card.removeAttribute('data-playing');
     }
     function stopCurrent() {
+      audioRelease(stopCurrent);
       if (currentAudio) {
         try { currentAudio.pause(); } catch (e) {}
         currentAudio = null;
@@ -1328,6 +1364,7 @@
           settled = true;
           reject(new Error('stream error - check /#admin=system'));
         });
+        audioClaim(stopAudio);   // stop any card / modal-recording audio
         liveEl.play().catch(function (e) {
           if (settled) return;
           settled = true; reject(e);
@@ -1335,6 +1372,7 @@
       });
     }
     function stopAudio() {
+      audioRelease(stopAudio);
       if (specRaf) { cancelAnimationFrame(specRaf); specRaf = null; }
       if (liveEl) { try { liveEl.pause(); } catch (e) {} liveEl.src = ''; liveEl = null; }
       if (srcNode) { try { srcNode.disconnect(); } catch (e) {} srcNode = null; }
@@ -1696,6 +1734,7 @@
   // Hard-stop: pause + tear down the audio + clear cursor. Used when
   // switching rows or closing the modal.
   function stopModalAudio() {
+    audioRelease(stopModalAudio);
     stopCursorLoop();
     if (modalAudio) { try { modalAudio.pause(); } catch (e) {} modalAudio = null; }
     if (modalRecBtn) {
@@ -2641,6 +2680,7 @@
         if (modalAudio.paused) {
           playBtn.setAttribute('data-active', 'true');
           playBtn.innerHTML = ICON_PAUSE;
+          audioClaim(stopModalAudio);   // stop any card / live-stream audio
           modalAudio.play().catch(function () {});
         } else {
           pauseModalAudio();
@@ -2651,6 +2691,7 @@
       // Different row (or no current playback) - stop any current,
       // start fresh.
       stopModalAudio();
+      audioClaim(stopModalAudio);   // stop any card / live-stream audio
       playBtn.setAttribute('data-active', 'true');
       playBtn.innerHTML = ICON_PAUSE;
       modalRecBtn = playBtn;
