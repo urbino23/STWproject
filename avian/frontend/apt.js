@@ -937,7 +937,7 @@
     var sortMode = (window.__atlasSort) || 'count';
     var species = filtered.slice();
     if (sortMode === 'count') {
-      species.sort(function (a, b) { return (+b.total) - (+a.total); });
+      species.sort(function (a, b) { return (+b.n) - (+a.n); });
     } else if (sortMode === 'recent') {
       species.sort(function (a, b) {
         return (b.last_seen || '').localeCompare(a.last_seen || '');
@@ -948,14 +948,21 @@
       });
     }
 
+    // A species is a "lifer" in the current view if its all-time first
+    // detection falls inside the selected window - i.e. it was newly added
+    // to the life list this 1h / 12h / 24h / 7d. Never shown for the ALL
+    // window (every species would qualify against an open-ended span).
+    var now = Date.now();
+    var windowStartMs = now - currentHours * 3600000;
     grid.innerHTML = species.map(function (s) {
-      var total = +s.total || 0;
+      var total = +s.n || 0;
       var win = winBySci[s.sci] || 0;
+      var firstMs = Date.parse((s.first_seen || '').replace(' ', 'T'));
+      var isLifer = !isAllWindow && !isNaN(firstMs) && firstMs >= windowStartMs;
       var sketchSrc = './avian/api/cutout.php?sci=' + encodeURIComponent(s.sci) +
         (s.com ? '&com=' + encodeURIComponent(s.com) : '') +
         '&v=' + SKETCH_VERSION;
       var audioSrc = './avian/api/recording.php?sci=' + encodeURIComponent(s.sci);
-      var spectroSrc = './avian/api/spectrogram.php?sci=' + encodeURIComponent(s.sci);
       // The "all time" window makes the windowed count identical to the
       // all-time count - collapse to a single stat rather than print the
       // same number twice. Otherwise label the count with its span.
@@ -964,14 +971,15 @@
         : '<div><span class="n">' + fmtN(win) + '</span><span class="lbl-inline">' + windowLabel(currentHours) + '</span></div>'
           + '<div><span class="n">' + fmtN(total) + '</span><span class="lbl-inline">all time</span></div>';
       return ''
-        + '<article class="bird-card" data-sci="' + s.sci + '" data-audio="' + audioSrc + '" data-spectro="' + spectroSrc + '">'
+        + '<article class="bird-card" data-sci="' + s.sci + '" data-audio="' + audioSrc + '">'
+        +   (isLifer ? '<span class="lifer-badge" title="new to the life list in this window">lifer</span>' : '')
         +   '<div class="stat">' + statRows + '</div>'
         +   '<div class="img-wrap">'
         +     '<img loading="lazy" decoding="async" src="' + sketchSrc + '" alt="' + s.com + '">'
         +   '</div>'
-        +   '<div class="spectro-wrap" aria-hidden="true"></div>'
         +   '<h3>' + s.com + '</h3>'
         +   '<div class="sci">' + s.sci + '</div>'
+        +   '<div class="spectro-wrap" aria-hidden="true"></div>'
         +   '<div class="actions">'
         +     '<button type="button" class="chip play" data-action="play" aria-label="play recording">'
         +       ICON_PLAY + '<span>play</span>'
@@ -1037,17 +1045,41 @@
         var card = btn.closest('.bird-card');
         if (btn === currentBtn) { stopCurrent(); return; }
         stopCurrent();
+        audioClaim(stopCurrent);   // stop any modal-recording / live-stream audio
         setBtnState(btn, 'loading');
         currentBtn = btn;
-        // Kick off spectrogram load in parallel (it's a separate request).
+        // Render the spectrogram client-side from the recording's audio so
+        // it matches the active theme. paintSpectrogram paints with the
+        // --paper/--ink palette per data-theme (the same canvas the modal
+        // recordings use), instead of a fixed-colour PNG that can't follow
+        // light/dark mode. Decoded buffers are cached per URL.
         var spectroWrap = card.querySelector('.spectro-wrap');
         if (spectroWrap && !spectroWrap.firstChild) {
-          var img = document.createElement('img');
-          img.loading = 'lazy';
-          img.alt = '';
-          img.src = card.dataset.spectro;
-          img.addEventListener('error', function () { spectroWrap.removeChild(img); });
-          spectroWrap.appendChild(img);
+          var canvas = document.createElement('canvas');
+          spectroWrap.appendChild(canvas);
+          var aurl = card.dataset.audio;
+          if (_decodedCache[aurl]) {
+            paintSpectrogram(canvas, _decodedCache[aurl]);
+          } else {
+            var actx = getSpecCtx();
+            if (actx) {
+              fetch(aurl)
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+                .then(function (b) { return actx.decodeAudioData(b); })
+                .then(function (buf) {
+                  _decodedCache[aurl] = buf;
+                  // Guard on document containment, not spectroWrap.contains:
+                  // a 30s refreshAll() poll can rebuild the atlas and detach
+                  // this card mid-decode. The detached wrap still "contains"
+                  // its canvas, but a detached node measures 0x0, which would
+                  // trap paintSpectrogram in its size-retry loop forever.
+                  if (document.contains(canvas)) paintSpectrogram(canvas, buf);
+                })
+                .catch(function () { if (spectroWrap.contains(canvas)) spectroWrap.removeChild(canvas); });
+            } else {
+              spectroWrap.removeChild(canvas);
+            }
+          }
         }
         // Start audio.
         var audio = new Audio(card.dataset.audio);
