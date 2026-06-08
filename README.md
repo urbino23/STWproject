@@ -51,22 +51,19 @@ Collage: `http://birdnet.local/`. Stock BirdNET-Pi UI: `http://birdnet.local/ind
 
 ## 3. (Optional) Restyle the illustrations
 
-The repo ships with 450 bundled illustrations. To restyle or add region-specific species:
+The repo ships with 498 bundled illustrations (249 species, perched + flight). To restyle them or generate a set for your own region:
 
 ```bash
+pip install -r ~/BirdNET-Pi/avian/scripts/requirements.txt
 export GEMINI_API_KEY='your-key'
 
-# Re-render every species in BirdNET-Pi's model:
+# generate on a cream ground, cut the ground off, rebuild the collage masks
 python3 ~/BirdNET-Pi/avian/scripts/pregen.py --labels ~/BirdNET-Pi/model/labels.txt --force
-
-# Or filter to species observed in your eBird region:
-export EBIRD_API_KEY='your-key'
-python3 ~/BirdNET-Pi/avian/scripts/pregen.py \
-  --labels ~/BirdNET-Pi/model/labels.txt \
-  --ebird-region US-CA
+python3 ~/BirdNET-Pi/avian/scripts/cutout.py
+python3 ~/BirdNET-Pi/avian/scripts/build_masks.py
 ```
 
-Style lives in [`avian/scripts/prompt.template.md`](avian/scripts/prompt.template.md). Edit, re-run with `--force`.
+Filter to your region with `--ebird-region US-CA` (needs `EBIRD_API_KEY`). The full pipeline, prompt, reference images, and per-species tuning live in [`avian/scripts/README.md`](avian/scripts/README.md). Style lives in [`prompt.template.md`](avian/scripts/prompt.template.md).
 
 ---
 
@@ -85,9 +82,9 @@ See [`avian/forwarding/`](avian/forwarding/) for three independent recipes:
 ```
 avian/                  # everything we add to BirdNET-Pi
 ├── frontend/           # static HTML/JS/CSS for the collage
-├── assets/             # 450 bundled illustrations + cutouts + masks
+├── assets/             # 498 bundled illustrations + photo-cutout fallbacks
 ├── api/                # PHP shims served by BirdNET-Pi's PHP-FPM
-├── scripts/            # pregen.py + editable prompt template
+├── scripts/            # generate -> cutout -> masks pipeline + prompt
 └── forwarding/         # optional HA / MQTT / Cloudflare configs
 ```
 
