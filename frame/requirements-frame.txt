@@ -1,6 +1,7 @@
-# Frame Pi (runs display.py + drives the Inky panel).
-#   python3 -m venv .venv && .venv/bin/pip install -r requirements-frame.txt
-# On Raspberry Pi OS you may prefer Pimoroni's installer for the Inky deps:
-#   curl https://get.pimoroni.com/inky | bash
-Pillow>=10
-inky>=2.0.0
+# Frame Pi: display.py + the Inky panel.
+# On a Pi Zero W (ARMv6) numpy needs libatlas3-base, and the panel needs SPI +
+# I2C enabled. install.sh handles all of that, so prefer running install.sh on
+# a fresh Pi rather than installing this file by hand.
+Pillow>=10,<12
+inky>=2.1,<3
+tomli; python_version < "3.11"

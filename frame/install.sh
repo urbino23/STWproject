@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Install the AvianVisitors e-ink frame (display side) on a Raspberry Pi.
+# Enables SPI + I2C, installs deps, makes a venv, installs the systemd timer.
+set -euo pipefail
+cd "$(dirname "$0")"
+FRAME="$(pwd)"
+
+CONFIG_TXT=/boot/firmware/config.txt
+[ -f "$CONFIG_TXT" ] || CONFIG_TXT=/boot/config.txt
+
+echo "1/5  Enabling SPI + I2C (Inky needs both; SPI with no chip-select)..."
+sudo raspi-config nonint do_spi 0
+sudo raspi-config nonint do_i2c 0
+grep -q "^dtoverlay=spi0-0cs" "$CONFIG_TXT" || echo "dtoverlay=spi0-0cs" | sudo tee -a "$CONFIG_TXT" >/dev/null
+
+echo "2/5  Installing system packages (libatlas3-base is required for numpy on ARMv6)..."
+sudo apt-get update -qq
+sudo apt-get install -y python3-venv libatlas3-base
+
+echo "3/5  Creating venv and installing Python deps..."
+python3 -m venv .venv
+.venv/bin/pip install -q --upgrade pip
+.venv/bin/pip install -q -r requirements-frame.txt
+
+echo "4/5  Setting up config..."
+mkdir -p "$HOME/.birdframe"
+[ -f "$HOME/.birdframe/config.toml" ] || cp config.example.toml "$HOME/.birdframe/config.toml"
+
+echo "5/5  Installing systemd timer..."
+sed "s|/home/monalisa/AvianVisitors/frame|$FRAME|g; s|/home/monalisa|$HOME|g; s|User=monalisa|User=$USER|" \
+  systemd/birdframe.service | sudo tee /etc/systemd/system/birdframe.service >/dev/null
+sudo cp systemd/birdframe.timer /etc/systemd/system/birdframe.timer
+sudo systemctl daemon-reload
+sudo systemctl enable birdframe.timer
+
+cat <<DONE
+
+Done. Next:
+  1. Edit ~/.birdframe/config.toml  (set base_url and an image source).
+  2. Reboot once so SPI takes effect:   sudo reboot
+  3. It then runs every 15 min. Test immediately with:
+       $FRAME/.venv/bin/python display.py --config ~/.birdframe/config.toml --force
+DONE

@@ -1,78 +1,78 @@
 #!/usr/bin/env python3
-"""Frame-Pi side: turn a collage screenshot into panel pixels and push it.
+"""Frame-Pi client: turn a collage screenshot into Inky panel pixels.
 
-Runs on the Pi Zero W wired to the Inky Impression 13.3". Each invocation
-(driven by a systemd timer, ~every 15 min) it:
-
-  1. asks the site which species are in the window and builds a coarse
-     SIGNATURE (species set + count brackets);
-  2. refreshes the panel ONLY if that signature changed since last time --
-     or if a daily "heal" refresh is due -- and never during quiet hours.
-     E-ink refreshes are slow (~30s) and flash, so we don't fire one when
-     nothing meaningful changed;
-  3. obtains the screenshot (a local file from shoot.py, a published URL,
-     or by running shoot.py inline on a capable host);
-  4. rotates it to the panel's landscape buffer and pushes it. The Inky
-     library does the final map to the panel's native inks.
-
-With ``--preview out.png`` it skips the hardware and writes an approximate
-6-ink dither so you can see the result on any machine.
-
-  python3 display.py --config config.toml
-  python3 display.py --image shot.png --preview panel.png --no-signature
+Runs on the Pi Zero W on a systemd timer. Each run it decides whether a
+refresh is worth it (the species set or call-count brackets changed, and it
+is not quiet hours), then crops the title and collage from the screenshot,
+centres and mats them, and pushes the result to the Inky Impression 13.3".
+``--preview out.png`` writes an approximate 6-ink dither instead, so the
+look can be checked on any machine without the panel.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import inspect
 import io
 import json
 import os
 import re
+import statistics
 import sys
 import time
 import urllib.request
 from datetime import datetime
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-PANEL_W, PANEL_H = 1200, 1600  # portrait (the panel itself is 1600x1200 landscape)
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib
 
-# Approximate Spectra-6 inks -- used ONLY for the --preview dither. On real
-# hardware the Inky library maps to the panel's true palette.
-SPECTRA6 = [
-    (236, 234, 223), (26, 26, 28), (165, 60, 56),
-    (198, 176, 74), (49, 71, 130), (58, 110, 72),
-]
+PANEL_W, PANEL_H = 1200, 1600  # portrait; the panel itself is 1600x1200
+
+# Approximate Spectra-6 inks, used only for --preview. On hardware the Inky
+# library maps to the panel's real palette.
+SPECTRA6 = [(236, 234, 223), (26, 26, 28), (165, 60, 56),
+            (198, 176, 74), (49, 71, 130), (58, 110, 72)]
 
 DEFAULTS = {
-    "base_url": "http://birdnet.local",  # where the API + (optionally) screenshot live
+    "base_url": "http://birdnet.local",
     "hours": 24,
-    "image": "",            # local PNG written by shoot.py
-    "image_url": "",        # OR a published screenshot URL
-    "shoot": False,         # OR run shoot.py inline (capable hosts only)
-    "shoot_title": None,
-    "shoot_subtitle": None,
-    "rotate": 90,           # 90 or 270, depending on which way the frame hangs
-    "saturation": 0.6,      # Inky dither saturation
-    "quiet_start": 22,      # local hour [quiet_start, quiet_end) -> no refresh
-    "quiet_end": 6,
-    "heal_hours": 24,       # force a refresh at least this often (panel health)
+    "image": "",            # local PNG written by the shooter
+    "image_url": "",        # or a published screenshot URL
+    "shoot": False,         # or capture inline (needs a browser; not a Zero W)
+    "shoot_title": None, "shoot_subtitle": None,
+    "shoot_headline_px": 42, "shoot_eyebrow_px": 18, "shoot_lowercase": False,
+    "shoot_mat": 0.04, "shoot_small_floor": 0.07,
+    "mat": 0.12,            # crop to content, centre it, mat to this fraction
+    "rotate": 90,           # 90 or 270 if the frame hangs the other way up
+    "saturation": 0.6,
+    "panel": "",            # "el133uf1" forces the 13.3" driver if auto() fails
+    "quiet_start": 22, "quiet_end": 6,
+    "heal_hours": 24,
     "state": "~/.birdframe/state.json",
     "cache": "~/.birdframe",
     "timeout": 45,
-    "basic_user": None,     # if the whole site is gated
-    "basic_pass": None,
+    "basic_user": None, "basic_pass": None,
 }
 
 
-# ---------------------------------------------------------------- signature
-def slugify(sci: str) -> str:
+def _auth(cfg):
+    if not cfg.get("basic_user"):
+        return None
+    raw = f"{cfg['basic_user']}:{cfg.get('basic_pass') or ''}".encode()
+    return "Basic " + base64.b64encode(raw).decode()
+
+
+# --- change detection -------------------------------------------------------
+def slugify(sci):
     return re.sub(r"[^a-z0-9]+", "-", sci.lower()).strip("-")
 
 
-def _bucket(n: int) -> int:
-    # Coarse brackets: refresh when a species crosses one, not on every call.
+def _bucket(n):
     for i, edge in enumerate((1, 2, 5, 15, 40, 100, 300, 1000)):
         if n <= edge:
             return i
@@ -83,25 +83,92 @@ def fetch_recent(base, hours, timeout, auth=None):
     url = f"{base.rstrip('/')}/avian/api/birdnet-api.php?action=recent&hours={hours}"
     req = urllib.request.Request(url, headers={"User-Agent": "AvianVisitors-frame/1.0"})
     if auth:
-        req.add_header("Authorization", "Basic " + auth)
+        req.add_header("Authorization", auth)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read()).get("species", [])
+        return json.loads(r.read(2_000_000)).get("species", [])
 
 
-def signature(species) -> str:
+def signature(species):
     items = sorted((slugify(s["sci"]), _bucket(int(s.get("n") or 1))) for s in species)
     return hashlib.sha256(json.dumps(items).encode()).hexdigest()[:16]
 
 
-# ---------------------------------------------------------------- image i/o
-def get_image(source, timeout, auth=None) -> Image.Image:
-    if re.match(r"^https?://", source):
-        req = urllib.request.Request(source, headers={"User-Agent": "AvianVisitors-frame/1.0"})
+# --- image ------------------------------------------------------------------
+def get_image(src, timeout, auth=None):
+    if re.match(r"^https?://", src):
+        req = urllib.request.Request(src, headers={"User-Agent": "AvianVisitors-frame/1.0"})
         if auth:
-            req.add_header("Authorization", "Basic " + auth)
+            req.add_header("Authorization", auth)
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return Image.open(io.BytesIO(r.read())).convert("RGB")
-    return Image.open(os.path.expanduser(source)).convert("RGB")
+            return Image.open(io.BytesIO(r.read(20_000_000))).convert("RGB")
+    return Image.open(os.path.expanduser(src)).convert("RGB")
+
+
+def fit_panel(img):
+    if img.size != (PANEL_W, PANEL_H):
+        img = img.resize((PANEL_W, PANEL_H), Image.LANCZOS)
+    return img
+
+
+def _paper(img):
+    """Median of the four corners, robust to a stray inked corner."""
+    w, h = img.size
+    px = (img.getpixel(p) for p in ((4, 4), (w - 5, 4), (4, h - 5), (w - 5, h - 5)))
+    return tuple(int(statistics.median(c)) for c in zip(*px))
+
+
+def _place(content, paper, mat_frac):
+    s = min(PANEL_W * (1 - 2 * mat_frac) / content.width,
+            PANEL_H * (1 - 2 * mat_frac) / content.height)
+    nw, nh = max(1, round(content.width * s)), max(1, round(content.height * s))
+    content = content.resize((nw, nh), Image.LANCZOS)
+    canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
+    canvas.paste(content, ((PANEL_W - nw) // 2, (PANEL_H - nh) // 2))
+    return canvas
+
+
+def _region_bbox(img, paper, y0, y1):
+    region = img.crop((0, y0, img.width, y1))
+    diff = ImageChops.difference(region, Image.new("RGB", region.size, paper))
+    bb = diff.convert("L").point(lambda p: 255 if p > 34 else 0).getbbox()
+    return None if not bb else (bb[0], y0 + bb[1], bb[2], y0 + bb[3])
+
+
+def mat_and_center(img, mat_frac):
+    """Crop the title and collage, stack them tightly and centred, then mat.
+    Removes the layout's title-to-collage gap so it reads as one composition."""
+    img = img.convert("RGB")
+    paper = _paper(img)
+    mask = ImageChops.difference(img, Image.new("RGB", img.size, paper))
+    mask = mask.convert("L").point(lambda p: 255 if p > 34 else 0)
+    full = mask.getbbox()
+    if not full:
+        return img
+    levels = list(mask.resize((1, img.height), Image.BOX).tobytes())  # per-row content
+    top, bot = full[1], full[3]
+    split, run = None, 0
+    for y in range(top, bot):
+        if levels[y] <= 2:
+            run += 1
+            if run >= 30:  # first empty band of 30px splits title from collage
+                cy = y
+                while cy < bot and levels[cy] <= 2:
+                    cy += 1
+                split = (y - run + 1, cy)
+                break
+        else:
+            run = 0
+    tb = _region_bbox(img, paper, top, split[0]) if split else None
+    cb = _region_bbox(img, paper, split[1], bot + 1) if split else None
+    if not (tb and cb):
+        return _place(img.crop(full), paper, mat_frac)
+    title, collage = img.crop(tb), img.crop(cb)
+    gap = int(title.height * 0.55)
+    cw = max(title.width, collage.width)
+    comp = Image.new("RGB", (cw, title.height + gap + collage.height), paper)
+    comp.paste(title, ((cw - title.width) // 2, 0))
+    comp.paste(collage, ((cw - collage.width) // 2, title.height + gap))
+    return _place(comp, paper, mat_frac)
 
 
 def quantize_spectra6(img):
@@ -115,33 +182,29 @@ def quantize_spectra6(img):
     return img.convert("RGB").quantize(palette=pal, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
 
 
-def fit_panel(img):
-    if img.size != (PANEL_W, PANEL_H):
-        img = img.resize((PANEL_W, PANEL_H), Image.LANCZOS)
-    return img
-
-
-# ---------------------------------------------------------------- hardware
-def push_panel(img, rotate, saturation):
-    """Rotate to the panel's landscape buffer and push. Lazy Inky import so
-    this module loads fine on machines without the hardware."""
-    from inky.auto import auto
-
-    inky = auto()
+# --- hardware ---------------------------------------------------------------
+def push_panel(img, rotate, saturation, panel=""):
+    """Rotate to the panel's landscape buffer and push. Lazy import so this
+    module still loads on a machine without the Inky library."""
+    if panel == "el133uf1":
+        from inky.inky_el133uf1 import Inky
+        dev = Inky(resolution=(1600, 1200))
+    else:
+        from inky.auto import auto
+        dev = auto()
     buf = img.rotate(rotate, expand=True)
-    if buf.size != (inky.width, inky.height):
-        buf = buf.resize((inky.width, inky.height), Image.LANCZOS)
-    try:
-        inky.set_image(buf, saturation=saturation)  # Impression takes saturation
-    except TypeError:
-        inky.set_image(buf)
-    inky.show()
+    if buf.size != (dev.width, dev.height):
+        buf = buf.resize((dev.width, dev.height), Image.LANCZOS)
+    kw = {"saturation": saturation} if "saturation" in inspect.signature(dev.set_image).parameters else {}
+    dev.set_image(buf, **kw)
+    dev.show()
 
 
-# ---------------------------------------------------------------- state
+# --- state ------------------------------------------------------------------
 def load_state(path):
     try:
-        return json.load(open(os.path.expanduser(path)))
+        with open(os.path.expanduser(path)) as f:
+            return json.load(f)
     except Exception:
         return {"signature": None, "last_refresh": 0}
 
@@ -149,77 +212,82 @@ def load_state(path):
 def save_state(path, sig, when):
     path = os.path.expanduser(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    json.dump({"signature": sig, "last_refresh": when}, open(path, "w"))
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"signature": sig, "last_refresh": when}, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)  # atomic: a power cut can't leave a half-written file
 
 
 def in_quiet_hours(cfg, hour):
     s, e = cfg["quiet_start"], cfg["quiet_end"]
     if s == e:
         return False
-    return (s <= hour < e) if s < e else (hour >= s or hour < e)
+    return s <= hour < e if s < e else hour >= s or hour < e
 
 
-# ---------------------------------------------------------------- run
-def obtain_image(cfg, auth):
+# --- run --------------------------------------------------------------------
+def obtain_image(cfg):
     if cfg["shoot"]:
-        from shoot import shoot  # lazy: only needed on capable hosts
+        from shoot import shoot
         out = os.path.join(os.path.expanduser(cfg["cache"]), "shot.png")
         os.makedirs(os.path.dirname(out), exist_ok=True)
         shoot(cfg["base_url"], out, title=cfg["shoot_title"], subtitle=cfg["shoot_subtitle"],
-              timeout_ms=cfg["timeout"] * 1000, user=cfg["basic_user"], password=cfg["basic_pass"])
+              headline_px=cfg["shoot_headline_px"], eyebrow_px=cfg["shoot_eyebrow_px"],
+              lowercase=cfg["shoot_lowercase"], mat=cfg["shoot_mat"],
+              small_floor=cfg["shoot_small_floor"], timeout_ms=cfg["timeout"] * 1000,
+              user=cfg["basic_user"], password=cfg["basic_pass"])
         return Image.open(out).convert("RGB")
     src = cfg["image_url"] or cfg["image"]
     if not src:
-        raise SystemExit("no image source: set image, image_url, or shoot in config")
-    return get_image(src, cfg["timeout"], auth)
+        raise ValueError("set image, image_url, or shoot in config")
+    return get_image(src, cfg["timeout"], _auth(cfg))
 
 
 def run(cfg, preview=None, force=False, use_signature=True):
-    auth = None
-    if cfg["basic_user"]:
-        import base64
-        auth = base64.b64encode(f"{cfg['basic_user']}:{cfg['basic_pass'] or ''}".encode()).decode()
-
     now = time.time()
     state = load_state(cfg["state"])
     sig = None
     if use_signature:
         try:
-            species = fetch_recent(cfg["base_url"], cfg["hours"], cfg["timeout"], auth)
-            sig = signature(species)
-            print(f"{len(species)} species, signature {sig}")
+            sig = signature(fetch_recent(cfg["base_url"], cfg["hours"], cfg["timeout"], _auth(cfg)))
         except Exception as e:
-            print(f"signature fetch failed ({e}); will refresh to be safe", file=sys.stderr)
-
-    heal_due = (now - state.get("last_refresh", 0)) >= cfg["heal_hours"] * 3600
-    quiet = in_quiet_hours(cfg, datetime.now().hour)
-    changed = (sig is None) or (sig != state.get("signature"))
-
+            print(f"signature fetch failed: {e}", file=sys.stderr)  # treat as no change
+    heal_due = now - state.get("last_refresh", 0) >= cfg["heal_hours"] * 3600
+    changed = (not use_signature) or (sig is not None and sig != state.get("signature"))
     if not force and not preview:
-        if quiet and not heal_due:
-            print("quiet hours, nothing urgent -> skip")
+        if in_quiet_hours(cfg, datetime.now().hour):
+            print("quiet hours; skip")
             return
         if not changed and not heal_due:
-            print("no change since last refresh -> skip")
+            print("no change; skip")
             return
-        print("refreshing:" + (" heal" if heal_due and not changed else " changed"))
+        print("refresh:", "changed" if changed else "heal")
 
-    img = fit_panel(obtain_image(cfg, auth))
-
+    try:
+        img = fit_panel(obtain_image(cfg))
+    except Exception as e:
+        print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
+        return
+    if cfg["mat"] > 0:
+        img = mat_and_center(img, cfg["mat"])
     if preview:
         quantize_spectra6(img).save(preview)
         print(f"wrote preview {preview}")
         return
-
-    push_panel(img, cfg["rotate"], cfg["saturation"])
-    save_state(cfg["state"], sig, now)
+    try:
+        push_panel(img, cfg["rotate"], cfg["saturation"], cfg.get("panel", ""))
+    except Exception as e:
+        print(f"panel push failed: {e}", file=sys.stderr)
+        return
+    save_state(cfg["state"], sig if sig is not None else state.get("signature"), now)
     print("panel updated")
 
 
 def load_config(path):
     cfg = dict(DEFAULTS)
     if path:
-        import tomllib
         with open(os.path.expanduser(path), "rb") as f:
             cfg.update(tomllib.load(f))
     return cfg
@@ -229,24 +297,21 @@ def main():
     ap = argparse.ArgumentParser(description="Push the collage screenshot to the Inky panel.")
     ap.add_argument("--config")
     ap.add_argument("--base-url")
-    ap.add_argument("--image", help="local screenshot path")
-    ap.add_argument("--image-url", help="published screenshot URL")
+    ap.add_argument("--image")
+    ap.add_argument("--image-url")
     ap.add_argument("--preview", help="write a 6-ink preview PNG instead of pushing")
     ap.add_argument("--rotate", type=int)
     ap.add_argument("--force", action="store_true", help="refresh even if unchanged")
-    ap.add_argument("--no-signature", action="store_true", help="skip the change-detection fetch")
+    ap.add_argument("--no-signature", action="store_true", help="skip change detection")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    if args.base_url:
-        cfg["base_url"] = args.base_url
-    if args.image:
-        cfg["image"] = args.image
-    if args.image_url:
-        cfg["image_url"] = args.image_url
+    for key in ("base_url", "image", "image_url"):
+        val = getattr(args, key)
+        if val:
+            cfg[key] = val
     if args.rotate is not None:
         cfg["rotate"] = args.rotate
-
     run(cfg, preview=args.preview, force=args.force, use_signature=not args.no_signature)
 
 

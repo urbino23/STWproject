@@ -1,50 +1,50 @@
-# AvianVisitors e-ink frame -- copy to config.toml and edit.
-# config.toml is gitignored. Nothing secret lives here unless your WHOLE
-# site is behind basic-auth (see the bottom).
+# AvianVisitors e-ink frame. Copy to config.toml and edit.
+# config.toml is gitignored. Nothing here is secret unless your whole site is
+# behind basic-auth (see the bottom).
 
-# ---- the collage to mirror ----------------------------------------------
-# Default LAN install:
+# The collage to mirror: the LAN default, or a forwarded public site.
 base_url = "http://birdnet.local"
-# ...or a forwarded public site:
 # base_url = "https://bird.onethreenine.net"
 
-hours = 24            # window shown on the frame: "heard in the last N hours"
+hours = 24             # window shown on the frame
 
-# ---- titles (frame chrome -- the collage itself is the live site) --------
-# Leave these out to keep the site's own titles. Set them for a frame-
-# specific headline:
-# shoot_title    = "onethreenine birds"   # small italic eyebrow
-# shoot_subtitle = "heard today"          # large headline
-
-# ---- where the screenshot comes from (pick exactly ONE) -----------------
-# A) Capable frame Pi (Zero 2 W / Pi 3/4/5): take the screenshot on-device.
+# Where the screenshot comes from (pick one):
+#   A) a capable host (Pi 4/5, laptop, server): shoot inline.
 shoot = true
-#
-# B) Original Pi Zero W (can't run a browser): another host publishes the
-#    screenshot; fetch it.
+#   B) a Pi Zero W (no browser): another host publishes the PNG; fetch it.
 # image_url = "https://example.com/frame.png"
-#
-# C) A sibling process on this machine writes the PNG; read it.
-# image = "~/.birdframe/shot.png"
+#   C) a sibling process writes the PNG locally; read it.
+# image = "~/.birdframe/frame.png"
 
-# ---- panel --------------------------------------------------------------
-rotate     = 90      # 90 or 270 -- flip if the frame hangs upside down
-saturation = 0.6     # Inky colour saturation, 0-1
+# Panel.
+rotate = 90            # 90 or 270 if the frame hangs the other way up
+saturation = 0.6       # Inky colour saturation, 0 to 1
+mat = 0.12             # paper margin: crop to content, centre, mat to this
+# panel = "el133uf1"   # force the 13.3" driver if auto-detect ever fails
 
-# ---- refresh cadence ----------------------------------------------------
-# E-ink refreshes are slow (~30s) and flash, so the frame only refreshes
-# when the species set / call-count brackets change -- plus a daily heal.
-quiet_start = 22     # no refresh during [22:00, 06:00) local time
-quiet_end   = 6
-heal_hours  = 24     # force a refresh at least this often (panel health)
+# Refresh cadence. E-ink refresh is slow and flashes, so the panel only
+# refreshes when the species set or a count bracket changes, plus a daily
+# heal, and never during quiet hours.
+quiet_start = 22       # no refresh during [22:00, 06:00)
+quiet_end = 6
+heal_hours = 24        # force a refresh at least this often
 
-# ---- paths --------------------------------------------------------------
+# Paths.
 state = "~/.birdframe/state.json"
 cache = "~/.birdframe"
 timeout = 45
 
-# ---- only if your WHOLE site is password-gated --------------------------
-# (the AvianVisitors default leaves the collage + detection API public, so
-# you normally do NOT need these)
+# Titles and look. Used only in mode A (shoot = true). On a Pi Zero W these
+# belong in the shooter host's config instead.
+# shoot_title = "onethreenine birds"
+# shoot_subtitle = "heard today"
+# shoot_headline_px = 42
+# shoot_eyebrow_px = 18
+# shoot_lowercase = false
+# shoot_mat = 0.04
+# shoot_small_floor = 0.07
+
+# Only if your WHOLE site is behind basic-auth. The AvianVisitors default
+# leaves the collage and detection API public, so usually leave these out.
 # basic_user = "monalisa"
 # basic_pass = "..."
