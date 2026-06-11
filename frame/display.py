@@ -196,8 +196,9 @@ def mat_and_center(img, mat):
     comp = Image.new("RGB", (cw, title.height + gap + collage.height), paper)
     comp.paste(title, ((cw - title.width) // 2, 0))
     comp.paste(collage, (round(cw / 2 - ccx), title.height + gap))
-    if comp.height > box_h:  # too tall for the opening: scale to fit
-        comp = _scale_w(comp, cw * box_h / comp.height)
+    fit = min(box_w / comp.width, box_h / comp.height, 1.0)  # shrink to the opening, never enlarge
+    if fit < 1.0:
+        comp = comp.resize((max(1, round(comp.width * fit)), max(1, round(comp.height * fit))), Image.LANCZOS)
     canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
     canvas.paste(comp, ((PANEL_W - comp.width) // 2, (PANEL_H - comp.height) // 2))
     return canvas
@@ -205,11 +206,8 @@ def mat_and_center(img, mat):
 
 def quantize_spectra6(img):
     pal = Image.new("P", (1, 1))
-    flat = []
-    for c in SPECTRA6:
-        flat += list(c)
-    while len(flat) < 768:
-        flat += list(SPECTRA6[len(flat) // 3 % len(SPECTRA6)])
+    flat = [c for ink in SPECTRA6 for c in ink]
+    flat += list(SPECTRA6[0]) * ((768 - len(flat)) // 3)  # pad the 256-entry palette with paper
     pal.putpalette(flat[:768])
     return img.convert("RGB").quantize(palette=pal, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
 
@@ -225,6 +223,9 @@ def _draw_mat_box(img):
 def push_panel(img, rotate, saturation, panel=""):
     """Rotate to the panel's landscape buffer and push. Lazy import so this
     module still loads on a machine without the Inky library."""
+    if rotate not in (90, 270):
+        print(f"rotate must be 90 or 270, not {rotate}; using 90", file=sys.stderr)
+        rotate = 90
     if panel == "el133uf1":
         from inky.inky_el133uf1 import Inky
         dev = Inky(resolution=(1600, 1200))

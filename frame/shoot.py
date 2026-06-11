@@ -75,10 +75,10 @@ def _make_api_handler(floor_frac, window_hours, auth):
             data = route.fetch(**kw).json()
             sp = data.get("species", [])
             if sp and floor_frac > 0:
-                floor = max(int(s.get("n") or 1) for s in sp) * floor_frac
+                floor = max((s.get("n") or 1) for s in sp) * floor_frac
                 for s in sp:
-                    if float(s.get("n") or 1) < floor:
-                        s["n"] = int(round(floor))
+                    if (s.get("n") or 1) < floor:
+                        s["n"] = max(1, round(floor))
             route.fulfill(status=200, content_type="application/json", body=json.dumps(data))
         except Exception as e:
             print(f"recent-API rewrite skipped: {e}", file=sys.stderr)
@@ -86,7 +86,7 @@ def _make_api_handler(floor_frac, window_hours, auth):
     return handler
 
 
-def _make_js_handler(xbias, ybias, count_exp, pad, auth):
+def _make_js_handler(xbias, ybias, count_exp, pad, auth, misses):
     """Rewrite the collage tunables inside the page's apt.js at capture time."""
     def handler(route):
         try:
@@ -98,7 +98,7 @@ def _make_js_handler(xbias, ybias, count_exp, pad, auth):
                               (r"var pad = narrow \? Math\.max\(1, COLLAGE_PAD - 1\) : COLLAGE_PAD;", f"var pad = {pad};")):
                 js, n = re.subn(pat, repl, js)
                 if not n:
-                    print(f"apt.js pattern missed: {pat}", file=sys.stderr)
+                    misses.append(pat)
             route.fulfill(status=200, content_type="application/javascript; charset=utf-8", body=js)
         except Exception as e:
             print(f"apt.js rewrite skipped: {e}", file=sys.stderr)
@@ -121,8 +121,9 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
             if user:
                 ctx_kw["http_credentials"] = {"username": user, "password": password or ""}
             page = browser.new_context(**ctx_kw).new_page()
+            misses = []
             page.route("**/birdnet-api.php**", _make_api_handler(small_floor, window_hours, auth))
-            page.route("**/apt.js*", _make_js_handler(cluster_xbias, cluster_ybias, count_exp, cluster_pad, auth))
+            page.route("**/apt.js*", _make_js_handler(cluster_xbias, cluster_ybias, count_exp, cluster_pad, auth, misses))
 
             css = HIDE_CSS + _frame_css(headline_px, eyebrow_px, lowercase, pad_top, pad_side, pad_bottom, collage_vh)
             page.add_init_script(
@@ -133,20 +134,23 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
             resp = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             if resp is None or not resp.ok:
                 raise RuntimeError(f"site returned {resp.status if resp else 'no response'}")
+            page.wait_for_selector(".gtile", timeout=timeout_ms)  # no collage -> fatal, keep the last frame
             try:
-                page.wait_for_selector(".gtile", timeout=timeout_ms)
                 page.wait_for_function(
                     "() => { const t=[...document.querySelectorAll('.gtile img')];"
                     " return t.length>0 && t.every(i=>i.complete && i.naturalWidth>0); }",
                     timeout=timeout_ms)
             except PWTimeout:
-                print("collage did not fully settle; capturing anyway", file=sys.stderr)
+                print("some illustrations did not finish loading; capturing anyway", file=sys.stderr)
+            if misses:
+                raise RuntimeError(f"apt.js tunables not found ({len(misses)}); refusing to ship a half-tuned frame")
 
             if title is not None:
                 page.evaluate("t=>{const e=document.querySelector('.static-head .pre'); if(e)e.textContent=t;}", title)
             if subtitle is not None:
                 page.evaluate("s=>{const e=document.querySelector('.static-head h1'); if(e)e.textContent=s;}", subtitle)
             page.wait_for_timeout(250)
+            # clip is CSS px; device_scale_factor scales the PNG to vw*dsf by vh*dsf = 1200x1600
             page.screenshot(path=out, clip={"x": 0, "y": 0, "width": vw, "height": vh})
         finally:
             browser.close()
