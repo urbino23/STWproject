@@ -29,10 +29,10 @@ Headless Chromium does not run on an original **Pi Zero W** (ARMv6). So:
 
 - **Capable frame Pi** (Zero 2 W, Pi 3/4/5): set `shoot = true` and both halves
   run on the frame Pi. One box, done.
-- **Pi Zero W**: the screenshot is taken on another machine and the Pi only
-  displays it. The shooter is any 64-bit box that can run Chromium (a Pi 4/5, a
-  laptop, a NAS) or a serverless browser (Cloudflare Browser Rendering). It
-  publishes `frame.png`; the Pi fetches it via `image_url` or `image`.
+- **Pi Zero W**: the screenshot is taken elsewhere and the Pi only displays it.
+  The AvianVisitors Worker already renders one via Cloudflare Browser Rendering
+  at `/frame.png`, so no extra hardware is needed; or run the shooter yourself
+  on any 64-bit box. Either way the Pi fetches the PNG via `image_url`.
 
 ## Hardware
 
@@ -49,7 +49,7 @@ Headless Chromium does not run on an original **Pi Zero W** (ARMv6). So:
 git clone https://github.com/Twarner491/AvianVisitors
 cd AvianVisitors/frame
 ./install.sh          # enables SPI/I2C, installs deps, sets up the timer
-nano ~/.birdframe/config.toml   # set base_url and an image source
+nano ~/.birdframe/config.toml   # paste your FRAME_KEY into image_url
 sudo reboot           # so SPI takes effect
 ```
 
@@ -60,8 +60,24 @@ hangs upside down, set `rotate = 270`.
 
 ## The shooter (Pi Zero W only)
 
-Run `shoot.py` on the capable host and publish the PNG to the Pi. As a cron
-every 15 minutes:
+The Pi Zero W displays a PNG that something else renders. Two ways:
+
+**Built in (recommended).** The AvianVisitors aggregator Worker renders the
+collage with Cloudflare Browser Rendering and serves it at `/frame.png`, gated
+by a shared key (its `FRAME_KEY` secret) so the daily render budget cannot be
+drained. No shooter host, no cron: set `shoot = false` and point `image_url` at
+it.
+
+```toml
+base_url  = "https://bird.onethreenine.net"
+image_url = "https://bird.onethreenine.net/frame.png?k=YOUR_FRAME_KEY"
+```
+
+`display.py` fetches the image only when the birds change, so a render fires a
+handful of times a day, well inside the Workers Free plan's 10 min/day budget.
+
+**Self-hosted.** No Worker? Run `shoot.py` on any 64-bit box (a Pi 4/5, a
+laptop, a NAS) and copy the PNG to the Pi on a cron every 15 minutes:
 
 ```bash
 cd AvianVisitors/frame
@@ -76,10 +92,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-shoot.txt
   && scp -q /tmp/frame.png monalisa@birdpic:~/.birdframe/frame.png
 ```
 
-Then on the Pi set `image = "~/.birdframe/frame.png"`. (Passwordless `scp`
-needs the shooter's SSH key on the Pi.) For a no-hardware, always-on shooter,
-Cloudflare Browser Rendering can screenshot the kiosk URL and serve it at a URL
-the Pi reads via `image_url`.
+Then set `image = "~/.birdframe/frame.png"` on the Pi. (Passwordless `scp` needs
+the shooter's SSH key on the Pi.)
 
 ## Test without the panel
 

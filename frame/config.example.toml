@@ -2,18 +2,23 @@
 # config.toml is gitignored. Nothing here is secret unless your whole site is
 # behind basic-auth (see the bottom).
 
-# The collage to mirror: the LAN default, or a forwarded public site.
-base_url = "http://birdnet.local"
-# base_url = "https://bird.onethreenine.net"
+# The collage to mirror. The Pi reads the recent API here to decide when a
+# refresh is worth it, so point it at the public site (a Pi Zero W cannot reach
+# a LAN BirdNET-Pi by default anyway).
+base_url = "https://bird.onethreenine.net"
+# base_url = "http://birdnet.local"   # same-LAN BirdNET-Pi instead
 
 hours = 24             # window shown on the frame
 
-# Where the screenshot comes from (pick one):
-#   A) a capable host (Pi 4/5, laptop, server): shoot inline.
-shoot = true
-#   B) a Pi Zero W (no browser): another host publishes the PNG; fetch it.
-# image_url = "https://example.com/frame.png"
-#   C) a sibling process writes the PNG locally; read it.
+# Where the screenshot comes from. birdpic (a Pi Zero W) has no browser, so it
+# fetches a ready-made PNG: the aggregator Worker renders the collage via
+# Cloudflare Browser Rendering at /frame.png, gated by its FRAME_KEY secret.
+# Put that key after k=.
+shoot = false
+image_url = "https://bird.onethreenine.net/frame.png?k=YOUR_FRAME_KEY"
+# On a capable host (Pi 4/5, laptop) shoot inline instead of fetching:
+# shoot = true
+# Or read a PNG a sibling process drops next to us:
 # image = "~/.birdframe/frame.png"
 
 # Panel.
@@ -34,8 +39,8 @@ state = "~/.birdframe/state.json"
 cache = "~/.birdframe"
 timeout = 45
 
-# Titles and look. Used only in mode A (shoot = true). On a Pi Zero W these
-# belong in the shooter host's config instead.
+# Titles and look. Used only when shooting inline (shoot = true). With the
+# Worker endpoint these are baked in, so leave them out.
 # shoot_title = "onethreenine birds"
 # shoot_subtitle = "heard today"
 # shoot_headline_px = 42
