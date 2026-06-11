@@ -24,7 +24,7 @@ import time
 import urllib.request
 from datetime import datetime
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 
 try:
     import tomllib
@@ -46,8 +46,8 @@ DEFAULTS = {
     "shoot": False,         # or capture inline (needs a browser; not a Zero W)
     "shoot_title": None, "shoot_subtitle": None,
     "shoot_headline_px": 42, "shoot_eyebrow_px": 18, "shoot_lowercase": False,
-    "shoot_mat": 0.04, "shoot_small_floor": 0.07,
-    "mat": 0.12,            # crop to content, centre it, mat to this fraction
+    "shoot_mat": 0.04, "shoot_small_floor": 0.04,
+    "mat": 0.0,             # extra global shrink of the content inside the A5 opening
     "rotate": 90,           # 90 or 270 if the frame hangs the other way up
     "saturation": 0.6,
     "panel": "",            # "el133uf1" forces the 13.3" driver if auto() fails
@@ -117,9 +117,14 @@ def _paper(img):
     return tuple(int(statistics.median(c)) for c in zip(*px))
 
 
-def _place(content, paper, mat_frac):
-    s = min(PANEL_W * (1 - 2 * mat_frac) / content.width,
-            PANEL_H * (1 - 2 * mat_frac) / content.height)
+# The mat opening is an A5 rectangle (1 : sqrt(2)) centred in the panel; the
+# content floats inside it with `mat` of inner whitespace.
+A5_H = PANEL_H * 0.7071           # A5 is 1/sqrt(2) of the panel height
+A5_W = A5_H / 1.41421             # A5 aspect 1 : sqrt(2)
+
+
+def _place(content, paper, mat):
+    s = min(A5_W * (1 - mat) / content.width, A5_H * (1 - mat) / content.height)
     nw, nh = max(1, round(content.width * s)), max(1, round(content.height * s))
     content = content.resize((nw, nh), Image.LANCZOS)
     canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
@@ -134,9 +139,28 @@ def _region_bbox(img, paper, y0, y1):
     return None if not bb else (bb[0], y0 + bb[1], bb[2], y0 + bb[3])
 
 
-def mat_and_center(img, mat_frac):
-    """Crop the title and collage, stack them tightly and centred, then mat.
-    Removes the layout's title-to-collage gap so it reads as one composition."""
+def _scale_w(img, target_w):
+    s = target_w / img.width
+    return img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
+
+
+def _centroid_x(img, paper):
+    """Horizontal centre of ink weight (what the eye reads as centred)."""
+    m = ImageChops.difference(img, Image.new("RGB", img.size, paper)).convert("L")
+    cols = list(m.resize((img.width, 1), Image.BOX).tobytes())
+    total = sum(cols) or 1
+    return sum(x * v for x, v in enumerate(cols)) / total
+
+
+# Content layout inside the A5 opening: the title and collage are sized
+# independently (as fractions of the opening width), so tuning one leaves the
+# other untouched. gap is a fraction of the opening height.
+TITLE_FRAC, COLLAGE_FRAC, GAP_FRAC = 0.55, 0.66, 0.1
+
+
+def mat_and_center(img, mat):
+    """Crop the title and collage, size each to a fraction of the A5 opening,
+    stack with a gap, and centre on the panel."""
     img = img.convert("RGB")
     paper = _paper(img)
     mask = ImageChops.difference(img, Image.new("RGB", img.size, paper))
@@ -160,15 +184,23 @@ def mat_and_center(img, mat_frac):
             run = 0
     tb = _region_bbox(img, paper, top, split[0]) if split else None
     cb = _region_bbox(img, paper, split[1], bot + 1) if split else None
+    box_w, box_h = A5_W * (1 - mat), A5_H * (1 - mat)
     if not (tb and cb):
-        return _place(img.crop(full), paper, mat_frac)
-    title, collage = img.crop(tb), img.crop(cb)
-    gap = int(title.height * 0.55)
-    cw = max(title.width, collage.width)
+        return _place(img.crop(full), paper, mat)
+    title = _scale_w(img.crop(tb), box_w * TITLE_FRAC)
+    collage = _scale_w(img.crop(cb), box_w * COLLAGE_FRAC)
+    gap = round(box_h * GAP_FRAC)
+    ccx = _centroid_x(collage, paper)  # centre the collage by ink weight, not bbox
+    half = max(ccx, collage.width - ccx)
+    cw = round(max(title.width, 2 * half))
     comp = Image.new("RGB", (cw, title.height + gap + collage.height), paper)
     comp.paste(title, ((cw - title.width) // 2, 0))
-    comp.paste(collage, ((cw - collage.width) // 2, title.height + gap))
-    return _place(comp, paper, mat_frac)
+    comp.paste(collage, (round(cw / 2 - ccx), title.height + gap))
+    if comp.height > box_h:  # too tall for the opening: scale to fit
+        comp = _scale_w(comp, cw * box_h / comp.height)
+    canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
+    canvas.paste(comp, ((PANEL_W - comp.width) // 2, (PANEL_H - comp.height) // 2))
+    return canvas
 
 
 def quantize_spectra6(img):
@@ -180,6 +212,13 @@ def quantize_spectra6(img):
         flat += list(SPECTRA6[len(flat) // 3 % len(SPECTRA6)])
     pal.putpalette(flat[:768])
     return img.convert("RGB").quantize(palette=pal, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+
+
+def _draw_mat_box(img):
+    """Dev aid: outline the A5 mat opening so the matte and centring show."""
+    x0, y0 = round((PANEL_W - A5_W) / 2), round((PANEL_H - A5_H) / 2)
+    ImageDraw.Draw(img).rectangle((x0, y0, PANEL_W - x0 - 1, PANEL_H - y0 - 1),
+                                  outline=(170, 60, 56), width=2)
 
 
 # --- hardware ---------------------------------------------------------------
@@ -245,7 +284,7 @@ def obtain_image(cfg):
     return get_image(src, cfg["timeout"], _auth(cfg))
 
 
-def run(cfg, preview=None, force=False, use_signature=True):
+def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     now = time.time()
     state = load_state(cfg["state"])
     sig = None
@@ -270,10 +309,12 @@ def run(cfg, preview=None, force=False, use_signature=True):
     except Exception as e:
         print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
         return
-    if cfg["mat"] > 0:
-        img = mat_and_center(img, cfg["mat"])
+    img = mat_and_center(img, cfg["mat"])
     if preview:
-        quantize_spectra6(img).save(preview)
+        out = quantize_spectra6(img)
+        if mat_box:
+            _draw_mat_box(out)
+        out.save(preview)
         print(f"wrote preview {preview}")
         return
     try:
@@ -303,6 +344,7 @@ def main():
     ap.add_argument("--rotate", type=int)
     ap.add_argument("--force", action="store_true", help="refresh even if unchanged")
     ap.add_argument("--no-signature", action="store_true", help="skip change detection")
+    ap.add_argument("--mat-box", action="store_true", help="dev: outline the mat window on the preview")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -312,7 +354,7 @@ def main():
             cfg[key] = val
     if args.rotate is not None:
         cfg["rotate"] = args.rotate
-    run(cfg, preview=args.preview, force=args.force, use_signature=not args.no_signature)
+    run(cfg, preview=args.preview, force=args.force, use_signature=not args.no_signature, mat_box=args.mat_box)
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ def _make_api_handler(floor_frac, window_hours, auth):
     return handler
 
 
-def _make_js_handler(xbias, ybias, count_exp, auth):
+def _make_js_handler(xbias, ybias, count_exp, pad, auth):
     """Rewrite the collage tunables inside the page's apt.js at capture time."""
     def handler(route):
         try:
@@ -94,7 +94,8 @@ def _make_js_handler(xbias, ybias, count_exp, auth):
             js = route.fetch(**kw).text()
             for pat, repl in ((r"var xBias = narrow \? 1 : T\.ellipseAspectBias;", f"var xBias = {xbias};"),
                               (r"var yBias = narrow \? 1\.7 : 1;", f"var yBias = {ybias};"),
-                              (r"countExp:\s*[\d.]+,", f"countExp: {count_exp},")):
+                              (r"countExp:\s*[\d.]+,", f"countExp: {count_exp},"),
+                              (r"var pad = narrow \? Math\.max\(1, COLLAGE_PAD - 1\) : COLLAGE_PAD;", f"var pad = {pad};")):
                 js, n = re.subn(pat, repl, js)
                 if not n:
                     print(f"apt.js pattern missed: {pat}", file=sys.stderr)
@@ -107,8 +108,8 @@ def _make_js_handler(xbias, ybias, count_exp, auth):
 
 def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
           headline_px=42, eyebrow_px=18, lowercase=False,
-          mat=0.04, collage_vh=52, cluster_xbias=1.3, cluster_ybias=1.0,
-          count_exp=0.4, small_floor=0.07, window_hours=None,
+          mat=0.04, collage_vh=52, cluster_xbias=1.0, cluster_ybias=1.2,
+          count_exp=0.4, cluster_pad=1, small_floor=0.04, window_hours=None,
           timeout_ms=45000, user=None, password=None):
     pad_side, pad_top, pad_bottom = int(vw * mat), int(vh * mat * 0.92), int(vh * mat)
     auth = "Basic " + base64.b64encode(f"{user}:{password or ''}".encode()).decode() if user else None
@@ -121,7 +122,7 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
                 ctx_kw["http_credentials"] = {"username": user, "password": password or ""}
             page = browser.new_context(**ctx_kw).new_page()
             page.route("**/birdnet-api.php**", _make_api_handler(small_floor, window_hours, auth))
-            page.route("**/apt.js*", _make_js_handler(cluster_xbias, cluster_ybias, count_exp, auth))
+            page.route("**/apt.js*", _make_js_handler(cluster_xbias, cluster_ybias, count_exp, cluster_pad, auth))
 
             css = HIDE_CSS + _frame_css(headline_px, eyebrow_px, lowercase, pad_top, pad_side, pad_bottom, collage_vh)
             page.add_init_script(
@@ -163,10 +164,11 @@ def main():
     ap.add_argument("--eyebrow-px", type=int, default=18)
     ap.add_argument("--mat", type=float, default=0.04)
     ap.add_argument("--collage-vh", type=float, default=52)
-    ap.add_argument("--cluster-xbias", type=float, default=1.3)
-    ap.add_argument("--cluster-ybias", type=float, default=1.0)
+    ap.add_argument("--cluster-xbias", type=float, default=1.0)
+    ap.add_argument("--cluster-ybias", type=float, default=1.2)
     ap.add_argument("--count-exp", type=float, default=0.4)
-    ap.add_argument("--small-floor", type=float, default=0.07)
+    ap.add_argument("--cluster-pad", type=int, default=1)
+    ap.add_argument("--small-floor", type=float, default=0.04)
     ap.add_argument("--window-hours", type=int)
     ap.add_argument("--width", type=int, default=600)
     ap.add_argument("--height", type=int, default=800)
@@ -179,7 +181,8 @@ def main():
         shoot(a.url, a.out, title=a.title, subtitle=a.subtitle, vw=a.width, vh=a.height, dsf=a.dsf,
               headline_px=a.headline_px, eyebrow_px=a.eyebrow_px, lowercase=a.lowercase,
               mat=a.mat, collage_vh=a.collage_vh, cluster_xbias=a.cluster_xbias,
-              cluster_ybias=a.cluster_ybias, count_exp=a.count_exp, small_floor=a.small_floor,
+              cluster_ybias=a.cluster_ybias, count_exp=a.count_exp, cluster_pad=a.cluster_pad,
+              small_floor=a.small_floor,
               window_hours=a.window_hours, timeout_ms=a.timeout, user=a.user, password=a.password)
     except Exception as e:
         print(f"shoot failed: {e}", file=sys.stderr)
