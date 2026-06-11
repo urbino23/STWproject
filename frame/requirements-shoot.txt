@@ -1,0 +1,5 @@
+# Screenshot host (runs shoot.py -- any machine that can run headless
+# Chromium; NOT an original Pi Zero W).
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-shoot.txt
+#   .venv/bin/playwright install chromium
+playwright>=1.40

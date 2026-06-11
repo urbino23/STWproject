@@ -1,0 +1,6 @@
+# Frame Pi (runs display.py + drives the Inky panel).
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-frame.txt
+# On Raspberry Pi OS you may prefer Pimoroni's installer for the Inky deps:
+#   curl https://get.pimoroni.com/inky | bash
+Pillow>=10
+inky>=2.0.0

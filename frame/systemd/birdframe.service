@@ -1,0 +1,14 @@
+[Unit]
+Description=AvianVisitors e-ink frame update
+Documentation=https://github.com/Twarner491/AvianVisitors
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Edit User + paths to match your install.
+User=monalisa
+WorkingDirectory=/home/monalisa/AvianVisitors/frame
+ExecStart=/home/monalisa/AvianVisitors/frame/.venv/bin/python display.py --config /home/monalisa/.birdframe/config.toml
+# A wedged browser/network shouldn't hang the timer forever.
+TimeoutStartSec=180
