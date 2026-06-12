@@ -2,9 +2,9 @@
 
 *The last 24h of birds, framed on the wall by your window.*
 
-A [Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impression-13-3) (Spectra 6) mirroring the live collage. A Pi screenshots the site, mats it onto an A5 opening, and pushes to the panel, refreshing only when the birds change. Build one of your own at [theodore.net/projects/AvianVisitors#frame-ous](https://theodore.net/projects/AvianVisitors/#frame-ous).
+A [Pimoroni Inky Impression 13.3"](https://amzn.to/4xlAWr3) (Spectra 6) mirroring the live collage. A Pi screenshots the site, mats it onto an A5 opening, and pushes to the panel, refreshing only when the birds change. Build one of your own at [theodore.net/projects/AvianVisitors#frame-ous](https://theodore.net/projects/AvianVisitors/#frame-ous).
 
-<img alt="avianvisitors frame" src="https://theodore.net/assets/images/AvianVisitors/final.jpg" />
+![](https://theodore.net/assets/images/AvianVisitors/final.jpg)
 
 ---
 
