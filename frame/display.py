@@ -51,7 +51,7 @@ DEFAULTS = {
     "rotate": 90,           # 90 or 270 if the frame hangs the other way up
     "saturation": 0.6,
     "panel": "",            # "el133uf1" forces the 13.3" driver if auto() fails
-    "quiet_start": 22, "quiet_end": 6,
+    "quiet_start": 0, "quiet_end": 0,    # 0/0 = no quiet hours
     "heal_hours": 24,
     "state": "~/.birdframe/state.json",
     "cache": "~/.birdframe",

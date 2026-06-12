@@ -35,9 +35,17 @@ sudo systemctl enable birdframe.timer
 
 cat <<DONE
 
-Done. Next:
-  1. Edit ~/.birdframe/config.toml  (set base_url and an image source).
-  2. Reboot once so SPI takes effect:   sudo reboot
-  3. It then runs every 15 min. Test immediately with:
-       $FRAME/.venv/bin/python display.py --config ~/.birdframe/config.toml --force
+Installed. Set your image source in ~/.birdframe/config.toml (your /frame.png
+key, or shoot = true); the panel fills itself in and refreshes every 15 min,
+only when the birds change.
 DONE
+
+# SPI only takes effect on a reboot, so do it for the user. Skip if SPI is
+# already up (e.g. a re-run) so we don't bounce a working frame.
+if [ -e /dev/spidev0.0 ]; then
+  echo "SPI already active, no reboot needed."
+else
+  echo "Rebooting to bring SPI up (back on its own in ~1 min)..."
+  sleep 4
+  sudo reboot
+fi
