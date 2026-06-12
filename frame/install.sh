@@ -13,9 +13,9 @@ sudo raspi-config nonint do_spi 0
 sudo raspi-config nonint do_i2c 0
 grep -q "^dtoverlay=spi0-0cs" "$CONFIG_TXT" || echo "dtoverlay=spi0-0cs" | sudo tee -a "$CONFIG_TXT" >/dev/null
 
-echo "2/5  Installing system packages (libatlas3-base is required for numpy on ARMv6)..."
+echo "2/5  Installing system packages (build tools to compile spidev, libatlas3-base for numpy)..."
 sudo apt-get update -qq
-sudo apt-get install -y python3-venv libatlas3-base
+sudo apt-get install -y python3-venv python3-dev build-essential libatlas3-base
 
 echo "3/5  Creating venv and installing Python deps..."
 python3 -m venv .venv
