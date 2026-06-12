@@ -12,11 +12,11 @@ A [Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impre
 
 | Qty | Description | Price | Link |
 |-----|-------------|-------|------|
-| 1 | Raspberry Pi Zero (2) W | ~$35 | [Raspberry Pi](https://www.raspberrypi.com/products/) |
-| 1 | 13.3" E Ink Display     | $299.99 | [Amazon](https://a.co/d/0eGzAzpD) |
-| 1 | A4 Wood Photo Frame    | $21.99 | [Amazon](https://a.co/d/03lpjhgH) |
+| 1 | Raspberry Pi Zero (2) W | ~$35 | [Amazon](https://amzn.to/49Xp58I) |
+| 1 | 13.3" E Ink Display     | $299.99 | [Amazon](https://amzn.to/4xlAWr3) |
+| 1 | A4 Wood Photo Frame    | $21.99 | [Amazon](https://amzn.to/3RWFbJE) |
 | 1 | Long, Flat Micro USB Cable    | $7.99 | [Amazon](https://a.co/d/0a59rKSk) |
-| 1 | Flat USB Brick    | $7.59 | [Amazon](https://a.co/d/05OLRpvT) |
+| 1 | Flat USB Brick    | $7.59 | [Amazon](https://amzn.to/3S4CtSs) |
 | | **Total** | **~$372** | | |
 
 CAD + 3d print files can be found in [`hardware/`](hardware/).
