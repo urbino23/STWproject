@@ -2,27 +2,37 @@
 
 *The last 24h of birds, framed on the wall by your window.*
 
-A [Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impression-13-3) (Spectra 6) mirroring the live collage. A Pi screenshots the site, mats it onto an A5 opening, and pushes to the panel, refreshing only when the birds change.
+A [Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impression-13-3) (Spectra 6) mirroring the live collage. A Pi screenshots the site, mats it onto an A5 opening, and pushes to the panel, refreshing only when the birds change. Build one of your own at [theodore.net/projects/AvianVisitors#frame-ous](https://theodore.net/projects/AvianVisitors/#frame-ous).
+
+<img alt="avianvisitors frame" src="https://theodore.net/assets/images/AvianVisitors/final.jpg" />
 
 ---
 
-## BOM
+### BOM
 
 | Qty | Description | Price | Link |
 |-----|-------------|-------|------|
-| 1 | Raspberry Pi Zero 2 W | ~$35 | [Raspberry Pi](https://www.raspberrypi.com/products/) |
-| 1 | 13.3" E Ink Display | $299.99 | [Amazon](https://a.co/d/0eGzAzpD) |
-| 1 | A4 wood photo frame | $21.99 | [Amazon](https://a.co/d/03lpjhgH) |
+| 1 | Raspberry Pi Zero (2) W | ~$35 | [Raspberry Pi](https://www.raspberrypi.com/products/) |
+| 1 | 13.3" E Ink Display     | $299.99 | [Amazon](https://a.co/d/0eGzAzpD) |
+| 1 | A4 Wood Photo Frame    | $21.99 | [Amazon](https://a.co/d/03lpjhgH) |
+| 1 | Long, Flat Micro USB Cable    | $7.99 | [Amazon](https://a.co/d/0a59rKSk) |
+| 1 | Flat USB Brick    | $7.59 | [Amazon](https://a.co/d/05OLRpvT) |
+| | **Total** | **~$372** | | |
 
-Plus a flat micro-USB cable and a 5V brick. Backing-plate CAD and a print-ready 3MF are in [`hardware/`](hardware/).
+CAD + 3d print files can be found in [`hardware/`](hardware/).
 
 ---
 
 ## 1. Flash the SD card
 
-[Raspberry Pi Imager](https://www.raspberrypi.com/software/), Raspberry Pi OS Lite (64-bit). In the customisation dialog set a username, your WiFi, hostname `birdpic`, and enable SSH. Boot.
+Flash an sd card with Raspberry Pi OS Lite (64-bit) via [Raspberry Pi Imager](https://www.raspberrypi.com/software/). In the customisation dialog set:
 
----
+- Username
+- WiFi SSID + password
+- Hostname: `birdpic`
+- Enable SSH with password auth
+
+Then install in Pi and power up.
 
 ## 2. Run the installer
 
@@ -32,13 +42,13 @@ git clone https://github.com/Twarner491/AvianVisitors
 cd AvianVisitors/frame && ./install.sh
 ```
 
-Enables SPI + I2C, installs the deps and a 15-minute systemd timer, and writes `~/.birdframe/config.toml`.
+Enables SPI + I2C, installs the deps and a 15-minute systemd timer, writes `~/.birdframe/config.toml`, and reboots once to bring SPI up.
 
 ---
 
 ## 3. Point it at the collage
 
-The Pi is too small to run a browser, so it fetches a ready-made PNG. The aggregator Worker renders one at `/frame.png`, gated by a key. Set both in `~/.birdframe/config.toml`, then `sudo reboot` for SPI:
+After it reboots and comes back, set your image source in `~/.birdframe/config.toml`. The Pi is too small to run a browser, so it fetches a ready-made PNG that the aggregator Worker renders at `/frame.png`, gated by a key:
 
 ```toml
 base_url  = "https://bird.onethreenine.net"
