@@ -86,9 +86,16 @@ avian/                  # everything we add to BirdNET-Pi
 ├── api/                # PHP shims served by BirdNET-Pi's PHP-FPM
 ├── scripts/            # generate -> cutout -> masks pipeline + prompt
 └── forwarding/         # optional HA / MQTT / Cloudflare configs
+frame/                  # optional e-ink wall display
 ```
 
-Everything outside `avian/` is upstream BirdNET-Pi.
+Everything outside `avian/` and `frame/` is upstream BirdNET-Pi.
+
+---
+
+## Wall frame
+
+An optional e-ink frame mirrors the last 24h of birds onto a panel by your window. Build it from [`frame/`](frame/README.md).
 
 ---
 

@@ -1,115 +1,48 @@
 # AvianVisitors e-ink frame
 
-A wall frame that mirrors your live AvianVisitors collage onto a
-[Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impression-13-3)
-(Spectra 6): the birds heard outside your window in the last 24 hours, hung in
-a picture frame.
+*The last 24h of birds, framed on the wall by your window.*
 
-It shows **the actual website**, not a copy. A headless browser screenshots the
-collage, the controls are stripped, and the image is matted and pushed to the
-panel. Improve the site and the frame follows. The frame needs no credentials
-(the AvianVisitors collage and detection API are public).
+A [Pimoroni Inky Impression 13.3"](https://shop.pimoroni.com/products/inky-impression-13-3) (Spectra 6) mirroring the live collage. A Pi screenshots the site, mats it onto an A5 opening, and pushes to the panel, refreshing only when the birds change.
 
-## How it works
+---
 
-Two small programs:
+## BOM
 
-- **`shoot.py`** loads your collage URL at a portrait viewport, hides the
-  chrome, sets the titles, and rewrites three of the page's own collage
-  tunables at capture time (cluster shape, the count-to-size curve, a rare-bird
-  floor). Saves a 1200x1600 PNG. Needs headless Chromium.
-- **`display.py`** runs on the frame Pi: it refreshes only when the birds
-  actually change (plus a daily heal, never at night), crops the title and
-  collage, centres and mats them, and pushes to the Inky. `--preview` writes a
-  6-ink PNG instead, so you can check it with no hardware.
+| Qty | Description | Price | Link |
+|-----|-------------|-------|------|
+| 1 | Raspberry Pi Zero 2 W | ~$35 | [Raspberry Pi](https://www.raspberrypi.com/products/) |
+| 1 | 13.3" E Ink Display | $299.99 | [Amazon](https://a.co/d/0eGzAzpD) |
+| 1 | A4 wood photo frame | $21.99 | [Amazon](https://a.co/d/03lpjhgH) |
 
-## The one constraint: a screenshot needs a browser
+Plus a flat micro-USB cable and a 5V brick. Backing-plate CAD and a print-ready 3MF are in [`hardware/`](hardware/).
 
-Headless Chromium does not run on an original **Pi Zero W** (ARMv6). So:
+---
 
-- **Capable frame Pi** (Zero 2 W, Pi 3/4/5): set `shoot = true` and both halves
-  run on the frame Pi. One box, done.
-- **Pi Zero W**: the screenshot is taken elsewhere and the Pi only displays it.
-  The AvianVisitors Worker already renders one via Cloudflare Browser Rendering
-  at `/frame.png`, so no extra hardware is needed; or run the shooter yourself
-  on any 64-bit box. Either way the Pi fetches the PNG via `image_url`.
+## 1. Flash the SD card
 
-## Hardware
+[Raspberry Pi Imager](https://www.raspberrypi.com/software/), Raspberry Pi OS Lite (64-bit). In the customisation dialog set a username, your WiFi, hostname `birdpic`, and enable SSH. Boot.
 
-- **Inky Impression 13.3" (2025, Spectra 6)**, 1600x1200, ~30 s refresh. Mounts
-  as a 40-pin HAT; the Pi sits on the back.
-- A Raspberry Pi and a solid **2.5 A+** supply (the panel pulls real current on
-  refresh).
-- SPI **and** I2C must be on, plus the `spi0-0cs` overlay. `install.sh` does
-  this for you.
+---
 
-## Install on the frame Pi
+## 2. Run the installer
 
 ```bash
+ssh <your-username>@birdpic.local
 git clone https://github.com/Twarner491/AvianVisitors
-cd AvianVisitors/frame
-./install.sh          # enables SPI/I2C, installs deps, sets up the timer
-nano ~/.birdframe/config.toml   # paste your FRAME_KEY into image_url
-sudo reboot           # so SPI takes effect
+cd AvianVisitors/frame && ./install.sh
 ```
 
-`install.sh` installs `libatlas3-base` (numpy needs it on ARMv6), creates a
-venv, and installs a systemd timer that runs every 15 minutes. If panel
-auto-detect ever fails, set `panel = "el133uf1"` in the config. If the picture
-hangs upside down, set `rotate = 270`.
+Enables SPI + I2C, installs the deps and a 15-minute systemd timer, and writes `~/.birdframe/config.toml`.
 
-## The shooter (Pi Zero W only)
+---
 
-The Pi Zero W displays a PNG that something else renders. Two ways:
+## 3. Point it at the collage
 
-**Built in (recommended).** The AvianVisitors aggregator Worker renders the
-collage with Cloudflare Browser Rendering and serves it at `/frame.png`, gated
-by a shared key (its `FRAME_KEY` secret) so the daily render budget cannot be
-drained. No shooter host, no cron: set `shoot = false` and point `image_url` at
-it.
+The Pi is too small to run a browser, so it fetches a ready-made PNG. The aggregator Worker renders one at `/frame.png`, gated by a key. Set both in `~/.birdframe/config.toml`, then `sudo reboot` for SPI:
 
 ```toml
 base_url  = "https://bird.onethreenine.net"
 image_url = "https://bird.onethreenine.net/frame.png?k=YOUR_FRAME_KEY"
 ```
 
-`display.py` fetches the image only when the birds change, so a render fires a
-handful of times a day, well inside the Workers Free plan's 10 min/day budget.
-
-**Self-hosted.** No Worker? Run `shoot.py` on any 64-bit box (a Pi 4/5, a
-laptop, a NAS) and copy the PNG to the Pi on a cron every 15 minutes:
-
-```bash
-cd AvianVisitors/frame
-python3 -m venv .venv && .venv/bin/pip install -r requirements-shoot.txt
-.venv/bin/playwright install chromium
-```
-
-```cron
-*/15 * * * * cd ~/AvianVisitors/frame && .venv/bin/python shoot.py \
-  --url https://bird.onethreenine.net --title "onethreenine birds" \
-  --subtitle "heard today" --out /tmp/frame.png \
-  && scp -q /tmp/frame.png monalisa@birdpic:~/.birdframe/frame.png
-```
-
-Then set `image = "~/.birdframe/frame.png"` on the Pi. (Passwordless `scp` needs
-the shooter's SSH key on the Pi.)
-
-## Test without the panel
-
-Works on any machine, no Inky, no network beyond the site:
-
-```bash
-.venv/bin/python shoot.py --url https://bird.onethreenine.net \
-  --title "onethreenine birds" --subtitle "heard today" --out shot.png
-.venv/bin/python display.py --image shot.png --preview panel.png --no-signature
-open panel.png
-```
-
-## Refresh cadence
-
-The timer fires every 15 min, but a Spectra-6 refresh is a slow, flashy ~30 s
-event, so `display.py` only refreshes when the species set or a call-count
-bracket changes, plus one daily heal, and never during quiet hours
-(22:00 to 06:00 by default). New birds appear within ~15 min; the panel sits
-still otherwise.
+No Worker? Set `shoot = true` to screenshot on any capable host instead. Full options are in [`config.example.toml`](config.example.toml).
