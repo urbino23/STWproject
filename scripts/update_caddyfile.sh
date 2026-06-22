@@ -84,4 +84,12 @@ EOF
 fi
 
 sudo caddy fmt --overwrite /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+# Fail loudly on a Caddyfile caddy can't parse rather than reloading a broken
+# config and reporting success.
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || {
+  echo "generated Caddyfile failed validation; not reloading caddy" >&2
+  exit 1
+}
+# reload-or-restart so this also works at install time, when caddy may not be
+# running yet (a plain reload would fail there); tolerate a not-yet-ready unit.
+sudo systemctl reload-or-restart caddy 2>/dev/null || true
