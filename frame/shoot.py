@@ -184,14 +184,19 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
             resp = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             if resp is None or not resp.ok:
                 raise RuntimeError(f"site returned {resp.status if resp else 'no response'}")
-            page.wait_for_selector(".gtile", timeout=timeout_ms)  # no collage -> fatal, keep the last frame
-            try:
-                page.wait_for_function(
-                    "() => { const t=[...document.querySelectorAll('.gtile img')];"
-                    " return t.length>0 && t.every(i=>i.complete && i.naturalWidth>0); }",
-                    timeout=timeout_ms)
-            except PWTimeout:
-                print("some illustrations did not finish loading; capturing anyway", file=sys.stderr)
+            # Wait for the collage, or for the empty-state element the page shows
+            # when the mic has heard nothing yet, so a birdless frame renders a
+            # clean title card fast instead of hanging until the timeout. A page
+            # with neither still times out here and stays fatal (keep last frame).
+            page.wait_for_selector(".gtile, .empty", state="attached", timeout=timeout_ms)
+            if page.query_selector(".gtile") is not None:
+                try:
+                    page.wait_for_function(
+                        "() => { const t=[...document.querySelectorAll('.gtile img')];"
+                        " return t.length>0 && t.every(i=>i.complete && i.naturalWidth>0); }",
+                        timeout=timeout_ms)
+                except PWTimeout:
+                    print("some illustrations did not finish loading; capturing anyway", file=sys.stderr)
             if misses:
                 raise RuntimeError(f"apt.js tunables not found ({len(misses)}); refusing to ship a half-tuned frame")
 
@@ -199,6 +204,10 @@ def shoot(url, out, *, title=None, subtitle=None, vw=600, vh=800, dsf=2,
                 page.evaluate("t=>{const e=document.querySelector('.static-head .pre'); if(e)e.textContent=t;}", title)
             if subtitle is not None:
                 page.evaluate("s=>{const e=document.querySelector('.static-head h1'); if(e)e.textContent=s;}", subtitle)
+            # Soften the empty-state line for a fresh frame whose mic hasn't
+            # heard a bird yet, and darken it so it survives the e-ink dither and
+            # the matting step's ink detection (a no-op once there are birds).
+            page.evaluate("() => { const e = document.querySelector('.empty'); if (e) { e.textContent = 'listening for birds…'; e.style.color = '#555'; } }")
             page.wait_for_timeout(250)
             # clip is CSS px; device_scale_factor scales the PNG to vw*dsf by vh*dsf = 1200x1600
             page.screenshot(path=out, clip={"x": 0, "y": 0, "width": vw, "height": vh})

@@ -21,6 +21,13 @@ A [Pimoroni Inky Impression 13.3"](https://amzn.to/4xlAWr3) (Spectra 6) mirrorin
 
 CAD + 3d print files can be found in [`hardware/`](hardware/).
 
+### Kits
+
+I offer the frame and the bird mic as separate electronics kits. I put up a store for some of my open-source projects and will soon be able to offer kits cheaper than buying all the components individually, once I start buying in bulk.
+
+- [Frame kit](https://theodore.net/store/avian-visitors/)
+- [Bird mic kit](https://theodore.net/store/avian-mic/)
+
 ---
 
 ## 1. Flash the SD card
@@ -39,32 +46,22 @@ Then install in Pi and power up.
 ```bash
 ssh <your-username>@birdpic.local
 git clone https://github.com/Twarner491/AvianVisitors
-cd AvianVisitors/frame && ./install.sh
+cd AvianVisitors/frame
 ```
 
-Enables SPI + I2C, installs the deps and a 15-minute systemd timer, writes `~/.birdframe/config.toml`, and reboots once to bring SPI up.
-
----
-
-## 3. Point it at the collage
-
-After it reboots and comes back, set your image source in `~/.birdframe/config.toml`. The Pi is too small to run a browser, so it fetches a ready-made PNG that the aggregator Worker renders at `/frame.png`, gated by a key:
-
-```toml
-base_url  = "https://bird.onethreenine.net"
-image_url = "https://bird.onethreenine.net/frame.png?k=YOUR_FRAME_KEY"
-```
-
-No Worker? Set `shoot = true` to screenshot on any capable host instead. Full options are in [`config.example.toml`](config.example.toml).
-
----
-
-## No bird mic? BirdWeather mode
-
-To run the frame on its own, with no mic and no website, install with `--bird-weather` and your ZIP code instead of step 3:
+Pick how the frame gets its birds:
 
 ```bash
-cd AvianVisitors/frame && ./install.sh --bird-weather --zip 94107
+# Pair with your bird mic on the same network (birdnet.local). The default.
+./install.sh
+
+# No microphone: draw the collage from BirdWeather for any ZIP code.
+./install.sh --bird-weather --zip 94107
+
+# Bird mic hosted at a public URL: point the frame straight at it.
+./install.sh --image-url https://bird.onethreenine.net/frame.png?k=YOUR_FRAME_KEY
 ```
 
-It pulls the top recently-heard birds near that ZIP code from [BirdWeather](https://app.birdweather.com) and renders the collage on the Pi itself, refreshing every few hours. Cutouts load from this repo's illustrations on GitHub, so there is no image set to copy over; add illustrations for any local birds it is missing the same way you would for the site. ZIP codes with no station nearby fall back to the closest ones, and an optional `EBIRD_API_KEY` covers the most remote spots.
+Each one enables SPI + I2C, installs the deps and a systemd timer, writes `~/.birdframe/config.toml`, and reboots once to bring SPI up. Full options live in [`config.example.toml`](config.example.toml).
+
+BirdWeather mode renders on the Pi from this repo's illustrations on GitHub, so there is no image set to copy over. ZIP codes with no station nearby fall back to the closest ones, and an optional `EBIRD_API_KEY` covers the most remote spots.

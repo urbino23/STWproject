@@ -2,29 +2,68 @@
 # Install the AvianVisitors e-ink frame (display side) on a Raspberry Pi.
 # Enables SPI + I2C, installs deps, makes a venv, installs the systemd timer.
 #
-# Default mode mirrors a local bird mic (set the image source in the config).
-# Pass --bird-weather --zip <ZIP> to instead run the frame standalone from
-# BirdWeather data for that ZIP: it renders on the Pi and pulls cutouts from the
-# repo's raw GitHub URLs, so no mic and no local illustration folder are needed.
+# Three ways to feed the frame, pick one:
+#   ./install.sh                            mirror the BirdNET-Pi on your network
+#                                           (birdnet.local), rendered on this Pi
+#   ./install.sh --image-url <URL>          fetch a ready-made frame PNG instead
+#                                           (e.g. a public Cloudflare Worker)
+#   ./install.sh --bird-weather --zip <ZIP> standalone from BirdWeather, no mic
 set -euo pipefail
 cd "$(dirname "$0")"
 FRAME="$(pwd)"
 
-BIRD_WEATHER=0
+MODE=local            # local | image | birdweather
 ZIP=""
+IMAGE_URL=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --bird-weather) BIRD_WEATHER=1 ;;
-    --zip) ZIP="${2:-}"; shift ;;
-    --zip=*) ZIP="${1#*=}" ;;
+    --bird-weather) MODE=birdweather; shift ;;
+    --zip) [ $# -ge 2 ] || { echo "--zip needs a value, e.g. --zip 94107" >&2; exit 1; }
+           ZIP="$2"; shift 2 ;;
+    --zip=*) ZIP="${1#*=}"; shift ;;
+    --image-url) [ $# -ge 2 ] || { echo "--image-url needs a URL, e.g. --image-url https://bird.example/frame.png" >&2; exit 1; }
+                 MODE=image; IMAGE_URL="$2"; shift 2 ;;
+    --image-url=*) MODE=image; IMAGE_URL="${1#*=}"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
-  shift
 done
-if [ "$BIRD_WEATHER" = 1 ] && [ -z "$ZIP" ]; then
-  echo "--bird-weather needs --zip <ZIP code>, e.g. install.sh --bird-weather --zip 94107" >&2
+
+if [ -n "$ZIP" ] && [ "$MODE" != birdweather ]; then
+  echo "--zip only applies with --bird-weather" >&2
   exit 1
 fi
+
+# Validate inputs up front: a bad value would otherwise land in a config file or
+# a systemd unit verbatim. These checks also reject a flag passed as a value
+# (e.g. "--zip --image-url"), which would fail the format below.
+if [ "$MODE" = birdweather ]; then
+  if [ -z "$ZIP" ]; then
+    echo "--bird-weather needs --zip <ZIP code>, e.g. install.sh --bird-weather --zip 94107" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$ZIP" | LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$'; then
+    echo "--zip should look like a postal code, e.g. 94107 or SW1A 1AA" >&2
+    exit 1
+  fi
+fi
+if [ "$MODE" = image ]; then
+  if [ -z "$IMAGE_URL" ]; then
+    echo "--image-url needs a URL, e.g. install.sh --image-url https://bird.example/frame.png" >&2
+    exit 1
+  fi
+  case "$IMAGE_URL" in
+    http://*|https://*) ;;
+    *) echo "--image-url must start with http:// or https://" >&2; exit 1 ;;
+  esac
+  if printf '%s' "$IMAGE_URL" | LC_ALL=C grep -q '[^A-Za-z0-9._~:/?#@!$&()*+,;=%-]'; then
+    echo "--image-url has characters that are not allowed in a URL" >&2
+    exit 1
+  fi
+fi
+
+# local + birdweather render on the Pi (need a browser); image only fetches.
+NEEDS_BROWSER=1
+if [ "$MODE" = image ]; then NEEDS_BROWSER=0; fi
 
 CONFIG_TXT=/boot/firmware/config.txt
 [ -f "$CONFIG_TXT" ] || CONFIG_TXT=/boot/config.txt
@@ -42,19 +81,58 @@ echo "3/5  Creating venv and installing Python deps..."
 python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements-frame.txt
-if [ "$BIRD_WEATHER" = 1 ]; then
-  echo "     BirdWeather mode: installing Playwright + Chromium for on-Pi rendering (a few minutes)..."
+if [ "$NEEDS_BROWSER" = 1 ]; then
+  echo "     Installing Playwright + Chromium so the Pi can render the collage (a few minutes)..."
   .venv/bin/pip install -q playwright
   sudo .venv/bin/playwright install-deps chromium
   .venv/bin/playwright install chromium
 fi
 
-echo "4/5  Setting up config..."
+echo "4/5  Writing config..."
 mkdir -p "$HOME/.birdframe"
-[ -f "$HOME/.birdframe/config.toml" ] || cp config.example.toml "$HOME/.birdframe/config.toml"
+CONFIG="$HOME/.birdframe/config.toml"
+if [ -f "$CONFIG" ]; then
+  EXISTING="$(sed -n 's/^# birdframe-mode: //p' "$CONFIG" | head -1)"
+  if [ -n "$EXISTING" ] && [ "$EXISTING" != "$MODE" ]; then
+    echo "     $CONFIG is set up for '$EXISTING' mode, not '$MODE'." >&2
+    echo "     To switch, remove it and re-run:  rm $CONFIG" >&2
+    exit 1
+  fi
+  echo "     $CONFIG already exists, leaving it untouched."
+elif [ "$MODE" = local ]; then
+  cat > "$CONFIG" <<'CFG'
+# birdframe-mode: local
+# AvianVisitors frame, local mode: mirrors the BirdNET-Pi on your network.
+# This Pi screenshots birdnet.local itself, so there is nothing else to set up.
+base_url = "http://birdnet.local"
+shoot = true
+shoot_title = "Avian Visitors"
+shoot_subtitle = "Heard Today"
+rotate = 90          # flip to 270 if the frame hangs the other way up
+saturation = 0.6
+timeout = 45
+# If your BirdNET-Pi is behind basic-auth, uncomment and set these:
+# basic_user = "..."
+# basic_pass = "..."
+CFG
+elif [ "$MODE" = image ]; then
+  BASE="$(printf '%s' "$IMAGE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')"
+  # printf, not a heredoc: the URL is written literally, never shell-expanded.
+  {
+    printf '%s\n' '# birdframe-mode: image'
+    printf '%s\n' '# AvianVisitors frame, image mode: fetches a ready-made frame PNG.'
+    printf 'base_url = "%s"\n' "$BASE"
+    printf 'image_url = "%s"\n' "$IMAGE_URL"
+    printf '%s\n' 'shoot = false'
+    printf '%s\n' 'rotate = 90          # flip to 270 if the frame hangs the other way up'
+    printf '%s\n' 'saturation = 0.6'
+  } > "$CONFIG"
+else
+  { printf '%s\n' '# birdframe-mode: birdweather'; cat config.example.toml; } > "$CONFIG"
+fi
 
 echo "5/5  Installing systemd service + timer..."
-if [ "$BIRD_WEATHER" = 1 ]; then
+if [ "$MODE" = birdweather ]; then
   PY="$FRAME/.venv/bin/python"
   PNG="$HOME/.birdframe/frame.png"
   sudo tee /etc/systemd/system/birdframe.service >/dev/null <<SERVICE
@@ -77,6 +155,7 @@ SERVICE
   sed 's|OnUnitActiveSec=.*|OnUnitActiveSec=6h|' systemd/birdframe.timer \
     | sudo tee /etc/systemd/system/birdframe.timer >/dev/null
 else
+  # local + image both run display.py against the config; only the config differs.
   sed "s|/home/monalisa/AvianVisitors/frame|$FRAME|g; s|/home/monalisa|$HOME|g; s|User=monalisa|User=$USER|" \
     systemd/birdframe.service | sudo tee /etc/systemd/system/birdframe.service >/dev/null
   sudo cp systemd/birdframe.timer /etc/systemd/system/birdframe.timer
@@ -84,21 +163,33 @@ fi
 sudo systemctl daemon-reload
 sudo systemctl enable --now birdframe.timer  # --now starts it immediately, not only on the next boot
 
-if [ "$BIRD_WEATHER" = 1 ]; then
-  cat <<DONE
+case "$MODE" in
+  local)
+    cat <<DONE
+
+Installed. The frame mirrors birdnet.local on your network and refreshes every
+15 min, only when the birds change. Until the mic has heard its first bird it
+shows a plain title card. If the panel hangs upside down, set rotate = 270 in
+~/.birdframe/config.toml.
+DONE
+    ;;
+  image)
+    cat <<DONE
+
+Installed. The frame fetches its image from
+  $IMAGE_URL
+and refreshes every 15 min, only when the birds change.
+DONE
+    ;;
+  birdweather)
+    cat <<DONE
 
 Installed in BirdWeather mode for ZIP $ZIP. The frame renders the top birds
 near you on the Pi and refreshes every 6 hours. Cutouts come from the repo on
 GitHub, so add illustrations there for any local birds it is missing.
 DONE
-else
-  cat <<DONE
-
-Installed. Set your image source in ~/.birdframe/config.toml (your /frame.png
-key, or shoot = true); the panel fills itself in and refreshes every 15 min,
-only when the birds change.
-DONE
-fi
+    ;;
+esac
 
 # SPI only takes effect on a reboot, so do it for the user. Skip if SPI is
 # already up (e.g. a re-run) so we don't bounce a working frame.
