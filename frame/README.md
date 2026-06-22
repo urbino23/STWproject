@@ -45,6 +45,7 @@ Then install in Pi and power up.
 
 ```bash
 ssh <your-username>@birdpic.local
+sudo apt update && sudo apt install -y git
 git clone https://github.com/Twarner491/AvianVisitors
 cd AvianVisitors/frame
 ```
