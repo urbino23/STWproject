@@ -19,6 +19,13 @@ See it running at [bird.onethreenine.net](https://bird.onethreenine.net).
 
 Optional: a [Gemini API key](https://aistudio.google.com/apikey) to restyle illustrations, an [eBird API key](https://ebird.org/api/keygen) to filter species by region.
 
+### Kits
+
+I offer the bird mic and the wall frame as separate electronics kits. I put up a store for some of my open-source projects and will soon be able to offer kits cheaper than buying all the components individually, once I start buying in bulk.
+
+- [Bird mic kit](https://theodore.net/store/avian-mic/)
+- [Frame kit](https://theodore.net/store/avian-visitors/)
+
 ---
 
 ## 1. Flash the SD card

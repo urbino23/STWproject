@@ -43,10 +43,10 @@ DEFAULTS = {
     "hours": 24,
     "image": "",            # local PNG written by the shooter
     "image_url": "",        # or a published screenshot URL
-    "shoot": False,         # or capture inline (needs a browser; not a Zero W)
+    "shoot": False,         # or capture inline (needs a browser; the Zero 2 W handles it)
     "shoot_title": None, "shoot_subtitle": None,
     "shoot_headline_px": 42, "shoot_eyebrow_px": 18, "shoot_lowercase": False,
-    "shoot_mat": 0.04, "shoot_small_floor": 0.04,
+    "shoot_mat": 0.04, "shoot_small_floor": 0.04, "shoot_count_exp": 0.65,
     "mat": 0.0,             # extra global shrink of the content inside the A5 opening
     "rotate": 90,           # 90 or 270 if the frame hangs the other way up
     "saturation": 0.6,
@@ -144,6 +144,11 @@ def _scale_w(img, target_w):
     return img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
 
 
+def _scale_h(img, target_h):
+    s = target_h / img.height
+    return img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
+
+
 def _centroid_x(img, paper):
     """Horizontal centre of ink weight (what the eye reads as centred)."""
     m = ImageChops.difference(img, Image.new("RGB", img.size, paper)).convert("L")
@@ -155,10 +160,10 @@ def _centroid_x(img, paper):
 # Content layout inside the A5 opening: the title and collage are sized
 # independently (as fractions of the opening width), so tuning one leaves the
 # other untouched. gap is a fraction of the opening height.
-TITLE_FRAC, COLLAGE_FRAC, GAP_FRAC = 0.55, 0.66, 0.1
+TITLE_H_FRAC, COLLAGE_FRAC, GAP_FRAC = 0.065, 0.66, 0.1
 
 
-def mat_and_center(img, mat):
+def mat_and_center(img, mat, empty=False):
     """Crop the title and collage, size each to a fraction of the A5 opening,
     stack with a gap, and centre on the panel."""
     img = img.convert("RGB")
@@ -174,7 +179,7 @@ def mat_and_center(img, mat):
     for y in range(top, bot):
         if levels[y] <= 2:
             run += 1
-            if run >= 30:  # first empty band of 30px splits title from collage
+            if run >= 60:  # split below the headline; a 60px band clears the ~30px eyebrow/headline gap so the title stays whole
                 cy = y
                 while cy < bot and levels[cy] <= 2:
                     cy += 1
@@ -185,20 +190,45 @@ def mat_and_center(img, mat):
     tb = _region_bbox(img, paper, top, split[0]) if split else None
     cb = _region_bbox(img, paper, split[1], bot + 1) if split else None
     box_w, box_h = A5_W * (1 - mat), A5_H * (1 - mat)
+    # No birds: the content under the title is just the one-line empty-state
+    # note. Render a calm title card (a modest title with the small note
+    # below) rather than blowing the lone title up to fill the opening.
+    if empty and tb and cb:
+        title = _scale_h(img.crop(tb), box_h * TITLE_H_FRAC)
+        note = _scale_w(img.crop(cb), box_w * 0.30)
+        gap = round(box_h * 0.05)
+        cw = max(title.width, note.width)
+        comp = Image.new("RGB", (cw, title.height + gap + note.height), paper)
+        comp.paste(title, ((cw - title.width) // 2, 0))
+        comp.paste(note, ((cw - note.width) // 2, title.height + gap))
+        canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
+        canvas.paste(comp, ((PANEL_W - comp.width) // 2, (PANEL_H - comp.height) // 2))
+        return canvas
     if not (tb and cb):
         return _place(img.crop(full), paper, mat)
-    title = _scale_w(img.crop(tb), box_w * TITLE_FRAC)
-    collage = _scale_w(img.crop(cb), box_w * COLLAGE_FRAC)
+    title = _scale_h(img.crop(tb), box_h * TITLE_H_FRAC)
     gap = round(box_h * GAP_FRAC)
+    # Size the collage to fill the room left under the fixed-size title,
+    # binding on whichever of width or remaining height runs out first, so the
+    # title stays a consistent size whether the collage is tall or compact
+    # instead of ballooning when the collage happens to be short.
+    coll = img.crop(cb)
+    cs = min(box_w * COLLAGE_FRAC / coll.width, (box_h - title.height - gap) / coll.height)
+    collage = coll.resize((max(1, round(coll.width * cs)), max(1, round(coll.height * cs))), Image.LANCZOS)
     ccx = _centroid_x(collage, paper)  # centre the collage by ink weight, not bbox
     half = max(ccx, collage.width - ccx)
+    # A wildly off-centre collage can push the centroid-mirrored width (2*half)
+    # past the A5 opening; shrink only the collage, never the fixed-size title,
+    # so nothing spills under the physical mat.
+    if 2 * half > box_w:
+        s = box_w / (2 * half)
+        collage = collage.resize((max(1, round(collage.width * s)), max(1, round(collage.height * s))), Image.LANCZOS)
+        ccx = round(ccx * s)
+        half = max(ccx, collage.width - ccx)
     cw = round(max(title.width, 2 * half))
     comp = Image.new("RGB", (cw, title.height + gap + collage.height), paper)
     comp.paste(title, ((cw - title.width) // 2, 0))
     comp.paste(collage, (round(cw / 2 - ccx), title.height + gap))
-    fit = min(box_w / comp.width, box_h / comp.height, 1.0)  # shrink to the opening, never enlarge
-    if fit < 1.0:
-        comp = comp.resize((max(1, round(comp.width * fit)), max(1, round(comp.height * fit))), Image.LANCZOS)
     canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
     canvas.paste(comp, ((PANEL_W - comp.width) // 2, (PANEL_H - comp.height) // 2))
     return canvas
@@ -276,7 +306,7 @@ def obtain_image(cfg):
         shoot(cfg["base_url"], out, title=cfg["shoot_title"], subtitle=cfg["shoot_subtitle"],
               headline_px=cfg["shoot_headline_px"], eyebrow_px=cfg["shoot_eyebrow_px"],
               lowercase=cfg["shoot_lowercase"], mat=cfg["shoot_mat"],
-              small_floor=cfg["shoot_small_floor"], timeout_ms=cfg["timeout"] * 1000,
+              small_floor=cfg["shoot_small_floor"], count_exp=cfg["shoot_count_exp"], timeout_ms=cfg["timeout"] * 1000,
               user=cfg["basic_user"], password=cfg["basic_pass"])
         return Image.open(out).convert("RGB")
     src = cfg["image_url"] or cfg["image"]
@@ -289,9 +319,11 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     now = time.time()
     state = load_state(cfg["state"])
     sig = None
+    species = None
     if use_signature:
         try:
-            sig = signature(fetch_recent(cfg["base_url"], cfg["hours"], cfg["timeout"], _auth(cfg)))
+            species = fetch_recent(cfg["base_url"], cfg["hours"], cfg["timeout"], _auth(cfg))
+            sig = signature(species)
         except Exception as e:
             print(f"signature fetch failed: {e}", file=sys.stderr)  # treat as no change
     heal_due = now - state.get("last_refresh", 0) >= cfg["heal_hours"] * 3600
@@ -310,7 +342,7 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     except Exception as e:
         print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
         return
-    img = mat_and_center(img, cfg["mat"])
+    img = mat_and_center(img, cfg["mat"], empty=(species == []))
     if preview:
         out = quantize_spectra6(img)
         if mat_box:

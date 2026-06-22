@@ -238,6 +238,13 @@ EOF
   usermod -aG $USER caddy
   usermod -aG video caddy
   chmod g+r+x $HOME
+
+  # Serve the AvianVisitors collage at / rather than the stock BirdNET-Pi UI.
+  # The Caddyfile written above is the stock one (hardcoded php-fpm.sock, no
+  # index.html try_files override); re-apply both through update_caddyfile.sh,
+  # the single source of truth, so / serves index.html not index.php. Run it
+  # last so it wins.
+  "$HOME/BirdNET-Pi/scripts/update_caddyfile.sh"
 }
 
 install_avahi_aliases() {
