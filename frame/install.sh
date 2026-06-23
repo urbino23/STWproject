@@ -8,6 +8,7 @@
 #   ./install.sh --image-url <URL>          fetch a ready-made frame PNG instead
 #                                           (e.g. a public Cloudflare Worker)
 #   ./install.sh --bird-weather --zip <ZIP> standalone from BirdWeather, no mic
+#                                           (add --ebird-key <KEY> for remote ZIPs)
 set -euo pipefail
 cd "$(dirname "$0")"
 FRAME="$(pwd)"
@@ -15,6 +16,7 @@ FRAME="$(pwd)"
 MODE=local            # local | image | birdweather
 ZIP=""
 IMAGE_URL=""
+EBIRD_KEY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --bird-weather) MODE=birdweather; shift ;;
@@ -24,12 +26,19 @@ while [ $# -gt 0 ]; do
     --image-url) [ $# -ge 2 ] || { echo "--image-url needs a URL, e.g. --image-url https://bird.example/frame.png" >&2; exit 1; }
                  MODE=image; IMAGE_URL="$2"; shift 2 ;;
     --image-url=*) MODE=image; IMAGE_URL="${1#*=}"; shift ;;
+    --ebird-key) [ $# -ge 2 ] || { echo "--ebird-key needs a value (a free key from ebird.org/api/keygen)" >&2; exit 1; }
+                 EBIRD_KEY="$2"; shift 2 ;;
+    --ebird-key=*) EBIRD_KEY="${1#*=}"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
 if [ -n "$ZIP" ] && [ "$MODE" != birdweather ]; then
   echo "--zip only applies with --bird-weather" >&2
+  exit 1
+fi
+if [ -n "$EBIRD_KEY" ] && [ "$MODE" != birdweather ]; then
+  echo "--ebird-key only applies with --bird-weather" >&2
   exit 1
 fi
 
@@ -43,6 +52,10 @@ if [ "$MODE" = birdweather ]; then
   fi
   if ! printf '%s' "$ZIP" | LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$'; then
     echo "--zip should look like a postal code, e.g. 94107 or SW1A 1AA" >&2
+    exit 1
+  fi
+  if [ -n "$EBIRD_KEY" ] && ! printf '%s' "$EBIRD_KEY" | LC_ALL=C grep -qE '^[A-Za-z0-9]+$'; then
+    echo "--ebird-key should be the alphanumeric token from ebird.org/api/keygen" >&2
     exit 1
   fi
 fi
@@ -151,6 +164,10 @@ Environment=PYTHONUNBUFFERED=1
 Nice=10
 TimeoutStartSec=300
 SERVICE
+  # Remote ZIPs with no nearby station fall back to eBird, which needs a key.
+  if [ -n "$EBIRD_KEY" ]; then
+    echo "Environment=EBIRD_API_KEY=$EBIRD_KEY" | sudo tee -a /etc/systemd/system/birdframe.service >/dev/null
+  fi
   # BirdWeather's recent-species list drifts slowly, so refresh a few times a day.
   sed 's|OnUnitActiveSec=.*|OnUnitActiveSec=6h|' systemd/birdframe.timer \
     | sudo tee /etc/systemd/system/birdframe.timer >/dev/null
