@@ -2,8 +2,8 @@
 // AvianVisitors - bird image resolver.
 //
 // Lookup chain for /avian/api/cutout.php?sci=Calypte+anna:
-//   1. ../assets/illustrations/<slug>.png   (450+ bundled kachō-e renders)
-//   2. ../assets/cutouts/<slug>.png         (background-removed photo)
+//   1. ../assets/illustrations/<slug>.{png,jpg}  (bundled plates)
+//   2. ../assets/cutouts/<slug>.{png,jpg}        (background-removed photo)
 //   3. cached rembg of a Wikipedia photo at $HOME/BirdSongs/Extracted/cutouts/
 //   4. fresh Wikipedia -> rembg -> cache (skipped gracefully if rembg unset)
 //
@@ -39,40 +39,49 @@ $pose = (int)($_GET['pose'] ?? 1);
 if ($pose < 1 || $pose > 99) $pose = 1;
 $poseSuffix = $pose === 1 ? '' : "-$pose";
 
-function serve_png(string $path): void {
-    header('Content-Type: image/png');
+function serve_image(string $path): void {
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    header('Content-Type: ' . ($ext === 'jpg' || $ext === 'jpeg' ? 'image/jpeg' : 'image/png'));
     header('Cache-Control: public, max-age=86400');
     header('Content-Length: ' . (string)filesize($path));
     readfile($path);
     exit;
 }
 
-// 1. Bundled illustration with pose suffix (the kachō-e PNG the repo
-//    ships with). 450+ species cover both perched + flight.
-$bundled = dirname(__DIR__) . "/assets/illustrations/{$slug}{$poseSuffix}.png";
-if (is_file($bundled) && filesize($bundled) > 1024) {
-    serve_png($bundled);
-}
-// Pose-2 missing? Fall back to pose-1 so the flight tab still shows
-// the perched render instead of breaking to the photo fallback.
-if ($pose !== 1) {
-    $fallback = dirname(__DIR__) . "/assets/illustrations/$slug.png";
-    if (is_file($fallback) && filesize($fallback) > 1024) {
-        serve_png($fallback);
+// Resolve a bundled asset by slug, trying .png then .jpg. The repo
+// ships JPG plates; .png is kept first for back-compat with any
+// transparent renders dropped in alongside them.
+function find_asset(string $dir, string $slug): ?string {
+    foreach (['png', 'jpg'] as $ext) {
+        $p = "$dir/$slug.$ext";
+        if (is_file($p) && filesize($p) > 1024) return $p;
     }
+    return null;
+}
+
+$illusDir = dirname(__DIR__) . '/assets/illustrations';
+
+// 1. Bundled illustration with pose suffix. pose=1 (perched) is the
+//    bare slug; -N is flight. Species cover perched at minimum.
+if ($hit = find_asset($illusDir, "{$slug}{$poseSuffix}")) {
+    serve_image($hit);
+}
+// Pose-N missing? Fall back to the perched render so the flight tab
+// still shows something instead of breaking to the photo fallback.
+if ($pose !== 1 && ($hit = find_asset($illusDir, $slug))) {
+    serve_image($hit);
 }
 // 2. Bundled cutout (background-removed photo, fallback for species
 //    without an illustration).
-$cutout = dirname(__DIR__) . "/assets/cutouts/$slug.png";
-if (is_file($cutout) && filesize($cutout) > 1024) {
-    serve_png($cutout);
+if ($hit = find_asset(dirname(__DIR__) . '/assets/cutouts', $slug)) {
+    serve_image($hit);
 }
 
 // 3. Dynamic cache from a previous Wikipedia + rembg run.
 $cacheDir = dirname(__DIR__, 3) . '/BirdSongs/Extracted/cutouts';
 $cachePath = "$cacheDir/$slug.png";
 if (is_file($cachePath) && filesize($cachePath) > 1024) {
-    serve_png($cachePath);
+    serve_image($cachePath);
 }
 
 // 4. Fresh Wikipedia fetch + rembg. Skipped if rembg-cli isn't on
@@ -181,4 +190,4 @@ if ($im !== false) {
 // concurrent reader either sees the old cached file or the new one,
 // never a half-written PNG.
 @rename($tmpOut, $cachePath);
-serve_png($cachePath);
+serve_image($cachePath);
