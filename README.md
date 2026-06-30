@@ -1,6 +1,6 @@
 # AvianVisitors
 
-*A live bird collage from your window.*
+*A live grid of the birds at your window.*
 
 See it running at [bird.onethreenine.net](https://bird.onethreenine.net).
 
@@ -52,25 +52,30 @@ curl -s https://raw.githubusercontent.com/Twarner491/AvianVisitors/avian-visitor
 
 Clones this fork, installs BirdNET-Pi, symlinks the AvianVisitors overlay into the Caddy web root. Takes 20-40 minutes. Reboots when done.
 
-Collage: `http://birdnet.local/`. Stock BirdNET-Pi UI: `http://birdnet.local/index.php`. The menu button in the top right opens an admin overlay with settings, system, log, and tool panels.
+Grid: `http://birdnet.local/`. Stock BirdNET-Pi UI: `http://birdnet.local/index.php`. The menu button in the top right opens an admin overlay with settings, system, log, and tool panels.
 
 ---
 
-## 3. (Optional) Restyle the illustrations
+## 3. (Optional) Swap the illustrations
 
-The repo ships with 498 bundled illustrations (249 species, perched + flight). To restyle them or generate a set for your own region:
+The repo ships 307 bundled Audubon *Birds of America* plates, mapped onto the BirdNET species the model can detect. Two ways to change the art:
+
+**Import your own finished plates** — named by common name (`blue_jay.jpg`, `coopers_hawk.jpg`):
 
 ```bash
 pip install -r ~/BirdNET-Pi/avian/scripts/requirements.txt
-export GEMINI_API_KEY='your-key'  # image generation requires billing enabled
-
-# generate on a cream ground, cut the ground off, rebuild the collage masks
-python3 ~/BirdNET-Pi/avian/scripts/pregen.py --labels ~/BirdNET-Pi/model/labels.txt --force
-python3 ~/BirdNET-Pi/avian/scripts/cutout.py
-python3 ~/BirdNET-Pi/avian/scripts/build_masks.py
+python3 ~/BirdNET-Pi/avian/scripts/import_plates.py --source ~/plates --apply --replace
 ```
 
-Filter to your region with `--ebird-region US-CA` (needs `EBIRD_API_KEY`). The full pipeline, prompt, reference images, and per-species tuning live in [`avian/scripts/README.md`](avian/scripts/README.md). Style lives in [`prompt.template.md`](avian/scripts/prompt.template.md).
+**Or generate a kachō-e set** with Gemini (the original pipeline):
+
+```bash
+export GEMINI_API_KEY='your-key'  # image generation requires billing enabled
+python3 ~/BirdNET-Pi/avian/scripts/pregen.py --labels ~/BirdNET-Pi/model/labels.txt --force
+python3 ~/BirdNET-Pi/avian/scripts/cutout.py
+```
+
+Both map images to the scientific-name slugs the frontend serves. Filter generation to your region with `--ebird-region US-CA` (needs `EBIRD_API_KEY`). Full details — mapping, prompt, reference images, per-species tuning — live in [`avian/scripts/README.md`](avian/scripts/README.md).
 
 ---
 
@@ -88,10 +93,10 @@ See [`avian/forwarding/`](avian/forwarding/) for three independent recipes:
 
 ```
 avian/                  # everything we add to BirdNET-Pi
-├── frontend/           # static HTML/JS/CSS for the collage
-├── assets/             # 498 bundled illustrations + photo-cutout fallbacks
+├── frontend/           # static HTML/JS/CSS for the grid
+├── assets/             # 307 bundled Audubon plates
 ├── api/                # PHP shims served by BirdNET-Pi's PHP-FPM
-├── scripts/            # generate -> cutout -> masks pipeline + prompt
+├── scripts/            # plate import + optional kachō-e generator
 └── forwarding/         # optional HA / MQTT / Cloudflare configs
 frame/                  # optional e-ink wall display
 ```

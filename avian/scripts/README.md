@@ -1,19 +1,49 @@
-# Generating illustrations
+# Illustrations
 
-The collage art is generated, not hand-drawn. The repo ships 498 kachō-e
-illustrations (249 species, a perched and a flight pose each). To restyle
-them or build a set for your own region, the pipeline is four scripts in
-this directory.
+The frontend resolves a detection's scientific name to an image:
+`cutout.php` turns `Calypte anna` into the slug `calypte-anna` and serves
+`assets/illustrations/<slug>.{png,jpg}`. Anything that lands a correctly
+named file in that folder shows up. There are two ways to fill it.
 
-## Pipeline
+## A. Import finished plates (this fork)
 
-1. `pregen.py` renders each bird with Gemini 2.5 Flash Image, on a flat cream ground.
-2. `cutout.py` removes the ground with BiRefNet and crops to the bird.
-3. `build_masks.py` rebuilds the collage silhouette masks inlined in `apt.js`.
-4. `verify.py` (optional) runs an adversarial species-ID + anatomy check.
+This fork ships full Audubon *Birds of America* plates, named by common
+name and mapped onto the BirdNET vocabulary by `import_plates.py`.
 
 ```bash
 pip install -r requirements.txt
+
+# dry run: report matches, skips, and slug collisions
+python3 import_plates.py --source ~/plates
+
+# install (downscale longest side to 1200px JPG); --replace clears the old set
+python3 import_plates.py --source ~/plates --apply --replace
+```
+
+Source files are named by common name (`blue_jay.jpg`, `coopers_hawk.jpg`).
+The script normalises the name, maps it to a scientific name via
+`model/l18n/labels_en.json` *restricted to the BirdNET model vocabulary*
+(so the slug matches what a detection emits), downscales, and writes
+`<slug>.jpg`. It handles recent eBird/AOS renames the 6K v2.4 labels predate
+(`ALIAS`), pins split common names to the binomial actually in the model
+(`PIN`), and skips species the model doesn't know (`SKIP`). Edit those tables
+at the top of the script for a different source set. After installing, bump
+`IMG_VERSION` in `apt.js` so browsers drop cached copies.
+
+Plates are single-pose; the flight tab (`?pose=2`) falls back to the perched
+image automatically.
+
+## B. Generate kachō-e (optional, legacy)
+
+The original art was *generated* - kachō-e renders from Gemini, cut out and
+shown as transparent silhouettes. That pipeline still works if you'd rather
+have a generated set than finished plates:
+
+1. `pregen.py` renders each bird with Gemini 2.5 Flash Image, on a flat cream ground.
+2. `cutout.py` removes the ground with BiRefNet and crops to the bird.
+3. `verify.py` (optional) runs an adversarial species-ID + anatomy check.
+
+```bash
 export GEMINI_API_KEY='your-key'
 
 # 1. generate (cream ground) for your region's species
@@ -21,9 +51,6 @@ python3 pregen.py --labels ~/BirdNET-Pi/model/labels.txt --ebird-region US-CA
 
 # 2. cut the ground off and crop
 python3 cutout.py
-
-# 3. rebuild the collage masks, then bump SKETCH_VERSION + IMG_VERSION in apt.js
-python3 build_masks.py
 ```
 
 `--labels` takes any `Sci|Com` per-line file (BirdNET-Pi's `labels.txt` works
@@ -31,7 +58,11 @@ directly). `--ebird-region` filters to species actually seen in your region
 (needs `EBIRD_API_KEY`). Re-render one bird with
 `--species "Calypte anna|Anna's Hummingbird" --force`.
 
-## Why a cream ground
+> Note: the homepage is now a grid of whole plates, not the old silhouette
+> collage, so there is no longer a mask-building step. `build_masks.py` was
+> removed with the collage.
+
+### Why a cream ground
 
 The image model can't cut a clean transparent background on its own: it
 leaves holes and fringes, worst on pale birds. Rendering on a flat,
@@ -39,7 +70,7 @@ consistent cream ground gives a known color that BiRefNet removes cleanly,
 and the steady ground also holds the painting style together across the
 whole set. `cutout.py` is the step that makes the backgrounds transparent.
 
-## The prompt
+### The prompt
 
 `prompt.template.md` is the kachō-e prompt, sent verbatim per request with
 `{sci_name}`, `{com_name}`, and `{pose}` substituted. Edit it to change the
@@ -60,14 +91,14 @@ style. `pregen.py` attaches up to three reference images per request:
 
 All three degrade gracefully: a missing reference is simply not attached.
 
-## Hard species
+### Hard species
 
 `species-notes.json` holds one-line diagnostic addenda for species the model
 gets wrong. Each note names the field marks that matter and the look-alikes to
 avoid, and is appended to the prompt for that species. Add entries as you find
 drift; they carry forward to every future regeneration of that bird.
 
-## Verifying
+### Verifying
 
 `verify.py` sends each illustration back through Gemini Vision without telling
 it the target species, then checks the guess, the wing/leg/tail counts, and
@@ -78,7 +109,7 @@ python3 verify.py --labels labels.txt              # whole library -> verify-res
 python3 verify.py --labels labels.txt calypte-anna
 ```
 
-## What actually goes wrong
+### What actually goes wrong
 
 - **Sticks.** Perched raptors often come back gripping a twig the prompt
   forbade. Generate 2-3 and keep the clean one.
@@ -86,5 +117,3 @@ python3 verify.py --labels labels.txt calypte-anna
   look-alike (a swift becomes a swallow). Fixes, in order: a sharper
   `species-notes.json` note with anti-feature language; an anti-reference; a
   different style print; a one-off `--species` regen.
-- **Matched pair.** The perched and flight poses must read as the same
-  individual. Review them side by side before locking.

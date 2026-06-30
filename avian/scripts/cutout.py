@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AvianVisitors - cut the cream ground off the generated illustrations.
 
-Step 2 of the illustration pipeline (after pregen.py, before build_masks.py).
+Step 2 of the kachō-e generator (after pregen.py).
 
 pregen.py renders each bird on a flat cream ground because the image model
 can't cut a clean transparent background on its own (it leaves holes and

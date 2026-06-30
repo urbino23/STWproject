@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """AvianVisitors - generate kachō-e bird illustrations for a region.
 
-Step 1 of the illustration pipeline:
+Step 1 of the kachō-e generator (an optional alternative to the bundled
+Audubon plates; see import_plates.py and README.md):
     1. pregen.py       render each bird on a uniform cream ground
     2. cutout.py       remove the ground (BiRefNet) and crop to the bird
-    3. build_masks.py  refresh the collage silhouette masks in apt.js
 
 Reads a species list (BirdNET-Pi's labels.txt, eBird, or stdin),
 fetches a Wikipedia reference photo for each species, and generates an
