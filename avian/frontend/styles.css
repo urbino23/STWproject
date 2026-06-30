@@ -497,7 +497,20 @@
      the remaining viewport height. */
   .gcollage {
     flex: 1 1 auto; width: 100%; max-width: 1300px; margin: 0 auto;
-    position: relative; min-height: 0;
+    min-height: 0;
+    /* Recency grid: most-recent plate first. Columns grow to fill the
+       width but cap at 5 - max(160px, ...) makes each track at least a
+       fifth of the row (minus the 4 gaps), and collapses to fewer columns
+       on narrow screens. Scrolls internally when birds exceed the height. */
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(max(160px, calc((100% - 64px) / 5)), 1fr));
+    gap: 16px;
+    align-content: start;
+    overflow-y: auto;
+    padding-bottom: 12px;
+  }
+  @media (max-width: 700px) {
+    .gcollage { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
   }
   /* Centre-out bloom: each tile fades + scales in; JS staggers the
      animation-delay by distance from the cluster centre. backwards
@@ -535,31 +548,26 @@
     .stats-side h3.entering, .stats-side small.entering, .stats-side li.entering { animation: none; }
   }
   .gtile {
-    position: absolute;
-    background: transparent; border: 0; padding: 0; margin: 0;
-    overflow: visible; /* let drop-shadow extend past the bbox */
-    transition: transform 130ms ease;
-    /* Events are handled at the .collage level via alpha-mask
-       hit-testing - the tile rectangles must not intercept them. */
-    pointer-events: none;
+    position: relative;
+    background: var(--paper);
+    border: 0; padding: 0; margin: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    /* Plates are portrait-ish; a fixed cell aspect keeps the grid even
+       while object-fit shows the whole plate inside it. */
+    aspect-ratio: 4 / 5;
+    box-shadow: 0 2px 8px rgba(26,22,18,0.10), inset 0 0 0 1px rgba(26,22,18,0.06);
+    transition: transform 130ms ease, box-shadow 130ms ease;
   }
-  /* Hover state is driven by JS alpha-mask hit-testing (.is-hover),
-     NOT the CSS :hover pseudo - the rectangular tile bounding boxes
-     overlap, so :hover would light up the wrong bird. .is-hover only
-     ever sits on the one tile whose silhouette is actually under the
-     cursor. */
-  .gtile.is-hover { transform: scale(1.04); z-index: 3; }
+  /* Plates don't overlap in the grid, so .is-hover is driven by a plain
+     delegated mouseover (apt.js) - no alpha-mask hit-testing needed. */
+  .gtile.is-hover { transform: translateY(-3px) scale(1.02); z-index: 3;
+    box-shadow: 0 10px 24px rgba(26,22,18,0.22), inset 0 0 0 1px rgba(26,22,18,0.06); }
   .gtile img {
     width: 100%; height: 100%; object-fit: contain; display: block;
-    /* Cutouts arrive as alpha-bbox-cropped transparent-bg PNGs, so
-       object-fit: contain leaves no whitespace inside the tile - the
-       bird touches all four sides. Soft drop shadow keeps it readable
-       on paper. */
-    filter: drop-shadow(0 2px 6px rgba(26,22,18,0.10));
-    transition: filter 130ms ease;
-  }
-  .gtile.is-hover img {
-    filter: drop-shadow(0 3px 10px rgba(26,22,18,0.26)) saturate(1.1);
+    /* Audubon plates are full lithographs (caption included); contain
+       shows the whole plate, letterboxed on the paper card as needed. */
   }
   /* Hover pill - surfaces the windowed count for the bird under the
      cursor. Confirms (Anna's-hummingbird-is-#1 paranoia) that the
