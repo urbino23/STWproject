@@ -4,7 +4,9 @@
 
 See it running at [bird.onethreenine.net](https://bird.onethreenine.net).
 
-<img alt="avianvisitors collage" src="docs/thumb.png" />
+<!-- TODO: add a fresh hero screenshot of the plate grid at docs/thumb.png
+     (the old image showed the retired silhouette collage) and restore the
+     <img> here. -->
 
 ---
 
